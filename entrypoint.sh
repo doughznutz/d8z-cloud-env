@@ -47,6 +47,19 @@ create_repo() {
     fi
 }
 
+# Function to diff the repo against the src directory
+diff_repo() {
+    echo "Diffing the repo against src..."
+
+    git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
+    cd "$GITHUB_REPO"
+
+    # Copy files from the source directory
+    SOURCE_DIR="/src"
+    echo "Diffing repo files from source directory: $SOURCE_DIR"
+    diff "$SOURCE_DIR"/ .
+}
+
 # Function to create a new branch
 create_branch() {
     echo "Creating a new branch..."
@@ -135,6 +148,9 @@ case "$1" in
     create_repo)
         create_repo
         ;;
+    diff_repo)
+        diff_repo
+        ;;
     create_branch)
         create_branch
         ;;
@@ -149,7 +165,7 @@ case "$1" in
         exec /bin/bash
         ;;
     *)
-        echo "Usage: $0 {check_repo|create_repo|create_branch|create_pull_request <branch_name>|bash}"
+        echo "Usage: $0 {check_repo|create_repo|diff_repo|create_branch|create_pull_request <branch_name>|bash}"
         exit 1
         ;;
 esac

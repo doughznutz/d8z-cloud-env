@@ -1,10 +1,8 @@
 # Build:
 #  docker build . -t d8z-cloud-container
 # Run:
-#  Edit/Debug: docker run -it --rm --env-file .env -v .:/srcIO d8z-cloud-container /bin/bash
-#  Commit: docker run -it --rm --env-file .env d8z-cloud-container
-# Debug
-#  Commit SRC: /src/entrypoint  --- Commits "src" not "srcIO"
+#  Edit/Debug: docker run -it --rm --env-file .env -v .:/srcIO d8z-cloud-container bash
+#  Git Command: docker run -it --rm --env-file .env d8z-cloud-container <command>
 
 # We always use ubuntu to start.
 FROM ubuntu:latest
