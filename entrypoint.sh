@@ -1,12 +1,6 @@
 #!/bin/bash
 set -e
 
-# Load .env file if it exists
-if [ -f "/app/.env" ]; then
-    echo "Loading environment variables from .env file..."
-    export $(grep -v '^#' /app/.env | xargs)
-fi
-
 # Validate required environment variables
 if [ -z "$GITHUB_TOKEN" ] || [ -z "$GITHUB_USER" ] || [ -z "$GITHUB_REPO" ] || [ -z "$GITHUB_ORG" ]; then
     echo "Missing required environment variables. Ensure GITHUB_TOKEN, GITHUB_USER, GITHUB_REPO, and GITHUB_ORG are set."
@@ -15,9 +9,6 @@ fi
 
 GITHUB_API="https://api.github.com"
 AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
-
-# Prevent .env from being committed
-echo ".env" >> .gitignore
 
 # Function to check if the repository exists
 check_repo() {
@@ -63,19 +54,14 @@ echo "Cloning repository..."
 git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
 cd "$GITHUB_REPO"
 
-
 # Set Git author information (fixes missing PR author issue)
 git config --global user.name "$GITHUB_USER"
 git config --global user.email "${GITHUB_USER}@users.noreply.github.com"
-
 
 # Copy files from the source directory
 SOURCE_DIR="/src"
 echo "Copying files from mounted directory: $SOURCE_DIR"
 cp -r "$SOURCE_DIR"/* .
-
-# Ensure .env is not included in the commit
-git rm --cached .env &>/dev/null || true
 
 # Create a new branch
 BRANCH_NAME="auto-update-$(date +%s)"
