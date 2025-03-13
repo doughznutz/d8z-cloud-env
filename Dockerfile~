@@ -4,7 +4,7 @@
 #  Edit/Debug: docker run -it --rm --env-file .env -v .:/srcIO d8z-cloud-container /bin/bash
 #  Commit: docker run -it --rm --env-file .env d8z-cloud-container
 # Debug
-   Commit SRC: /src/entrypoint  --- Commits "src" not "srcIO"
+#  Commit SRC: /src/entrypoint  --- Commits "src" not "srcIO"
 
 # We always use ubuntu to start.
 FROM ubuntu:latest
