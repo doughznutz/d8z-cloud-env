@@ -35,4 +35,4 @@ RUN chmod +x /src/entrypoint.sh
 RUN dos2unix /src/entrypoint.sh
 
 # Set the entrypoint
-CMD ["/src/entrypoint.sh"]
+ENTRYPOINT ["/src/entrypoint.sh"]
