@@ -67,6 +67,11 @@ create_branch() {
     git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
     cd "$GITHUB_REPO"
 
+    if [ "$1" == "clean" ]; then
+	echo "Cleaning files in repository."
+	rm ./*
+    fi	
+    
     # Set Git author information (fixes missing PR author issue)
     git config --global user.name "$GITHUB_USER"
     git config --global user.email "${GITHUB_USER}@users.noreply.github.com"
@@ -152,7 +157,7 @@ case "$1" in
         diff_repo
         ;;
     create_branch)
-        create_branch
+        create_branch "$2"
         ;;
     create_pull_request)
         if [ -z "$2" ]; then
@@ -165,7 +170,7 @@ case "$1" in
         exec /bin/bash
         ;;
     *)
-        echo "Usage: $0 {check_repo|create_repo|diff_repo|create_branch|create_pull_request <branch_name>|bash}"
+        echo "Usage: $0 {check_repo|create_repo|diff_repo|create_branch <|clean>|create_pull_request <branch_name>|bash}"
         exit 1
         ;;
 esac
