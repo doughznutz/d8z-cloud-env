@@ -85,12 +85,33 @@ create_pull_request() {
 
     BRANCH_NAME="$1"
 
+    # Get the default branch of the repository
+    DEFAULT_BRANCH=$(curl -s -H "$AUTH_HEADER" "$GITHUB_API/repos/$GITHUB_ORG/$GITHUB_REPO" | jq -r '.default_branch')
+
+    if [ "$DEFAULT_BRANCH" == "null" ]; then
+        echo "Error: Could not determine the default branch. Check if the repository exists."
+        exit 1
+    fi
+
+    echo "Using default branch: $DEFAULT_BRANCH"
+
+    # Check if the branch exists
+    BRANCH_EXISTS=$(curl -s -H "$AUTH_HEADER" "$GITHUB_API/repos/$GITHUB_ORG/$GITHUB_REPO/branches/$BRANCH_NAME" | jq -r '.name')
+
+    if [ "$BRANCH_EXISTS" == "null" ]; then
+        echo "Error: Branch '$BRANCH_NAME' does not exist in $GITHUB_REPO."
+        exit 1
+    fi
+
+    # Construct correct head reference (org vs. forked repo)
+    HEAD_REF="$BRANCH_NAME"  # Use only the branch name if it's within the same repo
+
     PR_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "Accept: application/vnd.github+json" -X POST \
         "$GITHUB_API/repos/$GITHUB_ORG/$GITHUB_REPO/pulls" \
         -d "{
             \"title\": \"Automated Update - $(date)\",
-            \"head\": \"$GITHUB_USER:$BRANCH_NAME\",
-            \"base\": \"main\",
+            \"head\": \"$HEAD_REF\",
+            \"base\": \"$DEFAULT_BRANCH\",
             \"body\": \"This PR was created automatically by a Docker container.\",
             \"maintainer_can_modify\": true
         }")
@@ -104,6 +125,7 @@ create_pull_request() {
         echo "$PR_RESPONSE"
     fi
 }
+
 
 # Main logic to handle command-line arguments
 case "$1" in
@@ -123,9 +145,11 @@ case "$1" in
         fi
         create_pull_request "$2"
         ;;
+    bash)
+        exec /bin/bash
+        ;;
     *)
-        echo "Usage: $0 {check_repo|create_repo|create_branch|create_pull_request <branch_name>}"
+        echo "Usage: $0 {check_repo|create_repo|create_branch|create_pull_request <branch_name>|bash}"
         exit 1
         ;;
 esac
-
