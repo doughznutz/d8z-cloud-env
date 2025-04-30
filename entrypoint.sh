@@ -101,7 +101,7 @@ create_branch() {
     # git fetch origin "$MAIN_BRANCH"
     # git checkout "$MAIN_BRANCH"
     git checkout -b "$BRANCH_NAME"
-    git add .
+    git add -u .
     git commit -m "Automated update from container"
     git push origin "$BRANCH_NAME"
 
