@@ -47,7 +47,7 @@ create_repo() {
     fi
 }
 
-# Function to diff the repo against the src directory
+# Function to fetch the repo to a specified directory.
 fetch_repo() {
     if [ -z "$1" ]; then
         echo "Error: No destination directory given."
@@ -66,12 +66,11 @@ diff_repo() {
     echo "Diffing the repo against src..."
 
     git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
-    cd "$GITHUB_REPO"
 
     # Copy files from the source directory
     SOURCE_DIR="/src"
-    echo "Diffing repo files from source directory: $SOURCE_DIR"
-    diff "$SOURCE_DIR"/ .
+    echo "Diffing repo files from source directory: $SOURCE_DIR against $GITHUB_REPO"
+    diff "$SOURCE_DIR"/ "$GITHUB_REPO"/
 }
 
 # Function to create a new branch
