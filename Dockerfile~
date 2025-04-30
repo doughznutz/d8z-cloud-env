@@ -44,16 +44,13 @@ RUN apt-get update
 # Install Docker CLI
 RUN apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io
 
+# Install docker-compose
+RUN apt-get install -y --no-install-recommends docker-compose
+
 # Clean up unnecessary packages
 RUN apt-get autoremove -y && apt-get clean
+
 RUN rm -rf /var/lib/apt/lists/*
-
-# Install docker-compose
-RUN mkdir -p /usr/libexec/docker/cli-plugins
-RUN curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 \
-         -o /usr/libexec/docker/cli-plugins/docker-compose	 
-RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
-
 
 # Create a working directory
 WORKDIR /
