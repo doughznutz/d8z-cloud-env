@@ -1,8 +1,9 @@
 # Build:
 #  docker build . -t d8z-cloud-container
+# Help:
+#  docker run -it --rm --env-file .env d8z-cloud-container help
 # Run:
-#  Edit/Debug: docker run -it --rm --env-file .env -v .:/work d8z-cloud-container bash
-#  Git Command: docker run -it --rm --env-file .env d8z-cloud-container <command>
+#  docker run -it --rm --env-file .env -v .:/work d8z-cloud-container bash
 # DinD:
 #  docker run -it --rm --env-file .env -v /var/run/docker.sock:/var/run/docker.sock -v .:/work d8z-cloud-container bash
 
