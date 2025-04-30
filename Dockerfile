@@ -61,7 +61,7 @@ WORKDIR /
 
 # Copy the source code from the project directory.
 COPY ./ /src
-RUN rm /src/.env
+RUN rm -rf /src/.env
 
 # Copy scripts and ensure they are executable
 COPY entrypoint.sh /src/entrypoint.sh
