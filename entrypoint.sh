@@ -48,6 +48,20 @@ create_repo() {
 }
 
 # Function to diff the repo against the src directory
+fetch_repo() {
+    if [ -z "$1" ]; then
+        echo "Error: No destination directory given."
+        exit 1
+    fi
+
+    echo "Fetching the repo from github to $1"
+
+    git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
+    diff "$GITHUB_REPO" "$1"
+    cp -r "$GITHUB_REPO"/* "$1"/ || true
+}
+
+# Function to diff the repo against the src directory
 diff_repo() {
     echo "Diffing the repo against src..."
 
@@ -156,6 +170,13 @@ case "$1" in
     diff_repo)
         diff_repo
         ;;
+    fetch_repo)
+        if [ -z "$2" ]; then
+            echo "Usage: $0 fetch_repo <dest_dir>"
+            exit 1
+        fi
+        fetch_repo "$2"
+        ;;
     create_branch)
         create_branch "$2"
         ;;
@@ -170,7 +191,7 @@ case "$1" in
         exec /bin/bash
         ;;
     *)
-        echo "Usage: $0 {check_repo|create_repo|diff_repo|create_branch <|clean>|create_pull_request <branch_name>|bash}"
+        echo "Usage: $0 {check_repo|create_repo|diff_repo|fetch_repo <dest_dir>|create_branch <|clean>|create_pull_request <branch_name>|bash}"
         exit 1
         ;;
 esac
