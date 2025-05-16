@@ -1,0 +1,6 @@
+# FILE: ~/tools/docker/bazel/bash_aliases
+
+# Bazel aliases
+alias blaze='bazel'
+alias daze='bazel'
+

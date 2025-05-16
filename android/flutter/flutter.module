@@ -1,0 +1,18 @@
+#%Module1.0
+proc ModulesHelp { } {
+    puts stderr "Sets up Flutter environment"
+}
+
+module-whatis "Loads Flutter environment"
+
+# Set environment variables
+setenv FLUTTER_HOME /opt/flutter
+prepend-path PATH /opt/flutter/bin
+
+# Android Studio (and sdk)
+module load android_studio
+
+# Set aliases
+set-alias flutter-doctor "flutter doctor"
+set-alias flutter-run "flutter run"
+set-alias flutter-build "flutter build"
