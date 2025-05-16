@@ -1,0 +1,5 @@
+#
+# FILE: ~/docker/tools/base/bash_aliases
+
+# Initialize modules
+alias init_modules='source /usr/share/modules/init/bash'

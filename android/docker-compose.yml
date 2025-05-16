@@ -1,0 +1,180 @@
+# Define the common stuff as a function
+x-common: &common
+  environment:
+    - USER=${USER}
+    - PASSWORD=${DOCKER_PASSWORD}  # Set the VNC password
+    - VNC_PASSWORD=${VNC_PASSWORD}
+    - DISPLAY=:1
+    - RESOLUTION=1920x1080   # Set the screen resolution
+  ports:
+    - "5900:5900"   # VNC server port
+    - "6079:80"     # NoVNC web interface port
+  networks:
+    - dev-network
+  shm_size: "2g"
+
+
+
+services:
+  base:
+    image: tools:base
+    container_name: base
+    build:
+      context: ./base  # Path to the directory containing the Dockerfile
+      args:
+        USERNAME: ${USER}
+        PASSWORD: ${DOCKER_PASSWORD}
+    <<: *common
+    volumes:
+      - ./data:/home/${USER}/projects
+      - android_sdk:/opt/android-sdk
+      - android_studio:/opt/android-studio
+      - flutter_sdk:/opt/flutter    
+      - google:/opt/google
+      - modules:/usr/share/modules/modulefiles
+
+  flutter:
+    image: flutter
+    container_name: flutter
+    build:
+      context: ./flutter
+      args:
+        USERNAME: ${USER}
+    <<: *common
+    volumes:
+      - ./data:/home/${USER}/projects
+      - android_sdk:/opt/android-sdk
+      - android_studio:/opt/android-studio
+      - flutter_sdk:/opt/flutter    
+      - google:/opt/google
+      - modules:/usr/share/modules/modulefiles
+
+
+  android_studio:
+    image: android_studio
+    container_name: android_studio
+    build:
+      context: ./android_studio
+    <<: *common
+    ports:
+      - "5901:5900"   # HOST:CONTAINER Redirect the overlapping ports.
+      - "6080:6079"   # TODO: Remove env:base image to clean this up.
+    environment:
+      - DISPLAY=:0
+    volumes:
+      - ./data:/home/${USER}/projects
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - android_sdk:/opt/android-sdk
+      - android_studio:/opt/android-studio
+      - flutter_sdk:/opt/flutter    
+      - google:/opt/google
+      - modules:/usr/share/modules/modulefiles
+
+  android_sdk:
+    image: android_sdk
+    container_name: android_sdk
+    build:
+      context: ./android_sdk
+    <<: *common
+    ports:
+      - "5902:5900"   # HOST:CONTAINER Redirect the overlapping ports.
+      - "6081:6079"   # TODO: Remove env:base image to clean this up.
+    volumes:
+      - ./data:/home/${USER}/projects
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - android_sdk:/opt/android-sdk
+      - android_studio:/opt/android-studio
+      - flutter_sdk:/opt/flutter    
+      - google:/opt/google
+      - modules:/usr/share/modules/modulefiles
+
+  android_emulator:
+    image: android_emulator
+    container_name: android_emulator
+    build:
+      context: ./android_emulator
+      args:
+        USERNAME: ${USER}
+    <<: *common
+    devices:
+      - /dev/kvm
+    ports:
+      - "5903:5900"   # HOST:CONTAINER Redirect the overlapping ports.
+      - "6082:6079"   # TODO: Remove env:base image to clean this up.
+      - "5555:5555"
+    volumes:
+      - ./data:/home/${USER}/projects
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - android_emulator:/opt/android-sdk/system-images
+      - android_sdk:/opt/android-sdk
+      - android_studio:/opt/android-studio
+      - flutter_sdk:/opt/flutter    
+      - google:/opt/google
+      - modules:/usr/share/modules/modulefiles
+
+  android-emulator-ots:
+    image: budtmo/docker-android
+    container_name: android-emulator
+    privileged: true
+    ports:
+      - "6080:6080"     # Web VNC access (http://localhost:6080)
+      - "5554:5554"     # Emulator console (optional)
+      - "5555:5555"     # ADB connection port
+    environment:
+      - DEVICE=Samsung Galaxy S10
+      - APPIUM=false
+      - AUTO_RECORD=false
+    networks:
+      - dev-network
+
+  voideditor:
+    build:
+      context: ./voideditor
+      dockerfile: Dockerfile
+      args:
+        USERNAME: ${USER}
+        PASSWORD: ${DOCKER_PASSWORD}
+    container_name: voideditor
+    <<: *common
+    ports:
+      - "6080:80"          # Web VNC
+      - "5900:5900"        # VNC client
+    volumes:
+      - ./data:/home/${USER}/projects   # Mount your local data folder
+      - .:/home/${USER}/projects/env    # Mount your local data folder
+
+  vscode:
+    image: vscode
+    container_name: vscode
+    build:
+      context: ./vscode
+      args:
+        USERNAME: ${USER}
+        PASSWORD: ${DOCKER_PASSWORD}
+    privileged: true
+    ports:
+      - 8080:8080  # Access: http://localhost:8080
+    <<: *common
+    volumes:
+      # TODO: Change user from coder to ${USER}.
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./data:/home/${USER}/projects
+      - android_sdk:/opt/android-sdk
+      - android_studio:/opt/android-studio
+      - flutter_sdk:/opt/flutter    
+      - google:/opt/google
+      - modules:/usr/share/modules/modulefiles
+    
+networks:
+  dev-network:
+    driver: bridge
+
+volumes:
+  # Named volumes to share tools between containers.
+  android_emulator:
+  android_sdk: 
+  android_studio: 
+  flutter_sdk:
+  google:
+  modules:
+  

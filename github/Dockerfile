@@ -55,18 +55,17 @@ RUN curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-
          -o /usr/libexec/docker/cli-plugins/docker-compose	 
 RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
-
-# Create a working directory
-WORKDIR /
-
 # Copy the source code from the project directory.
 COPY ./ /src
 RUN rm -rf /src/.env
 
+# Create a working directory
+WORKDIR /app
+
 # Copy scripts and ensure they are executable
-COPY entrypoint.sh /src/entrypoint.sh
-RUN chmod +x /src/entrypoint.sh
-RUN dos2unix /src/entrypoint.sh
+COPY github/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+RUN dos2unix /app/entrypoint.sh
 
 # Set the entrypoint
-ENTRYPOINT ["/src/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]

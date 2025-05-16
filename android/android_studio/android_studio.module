@@ -1,0 +1,16 @@
+#%Module1.0
+proc ModulesHelp { } {
+    puts stderr "Sets up Android Studio environment"
+}
+
+module-whatis "Loads Android Studio environment"
+
+# Set environment variables
+setenv ANDROID_STUDIO_HOME /opt/android-studio
+prepend-path PATH /opt/android-studio/bin
+
+# Android SDK (adjust path if needed)
+module load android_sdk
+
+# Set aliases
+set-alias android-studio "studio"

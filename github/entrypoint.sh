@@ -81,8 +81,8 @@ create_branch() {
     cd "$GITHUB_REPO"
 
     if [ "$1" == "clean" ]; then
-	echo "Cleaning files in repository."
-	rm ./*
+	      echo "Cleaning files in repository."
+	      rm ./*
     fi	
     
     # Set Git author information (fixes missing PR author issue)
@@ -92,7 +92,7 @@ create_branch() {
     # Copy files from the source directory
     SOURCE_DIR="/src"
     echo "Copying files from source directory: $SOURCE_DIR"
-    cp -r "$SOURCE_DIR"/* .
+    cp -R "$SOURCE_DIR"/* .
 
     # MAIN_BRANCH="main"
     BRANCH_NAME="auto-update-$(date +%s)"
@@ -101,6 +101,7 @@ create_branch() {
     # git checkout "$MAIN_BRANCH"
     git checkout -b "$BRANCH_NAME"
     git add -u .
+    git add --all .
     git commit -m "Automated update from container"
     git push origin "$BRANCH_NAME"
 

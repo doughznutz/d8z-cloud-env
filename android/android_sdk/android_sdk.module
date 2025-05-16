@@ -1,0 +1,22 @@
+#%Module1.0
+proc ModulesHelp { } {
+    puts stderr "Sets up Android SDK environment"
+}
+
+module-whatis "Loads Android SDK environment"
+
+# Set environment variables
+setenv ANDROID_SDK_ROOT /opt/android-sdk
+setenv ANDROID_HOME /opt/android-sdk
+
+# Add Android SDK tools to PATH
+prepend-path PATH $::env(ANDROID_SDK_ROOT)/platform-tools
+prepend-path PATH $::env(ANDROID_SDK_ROOT)/emulator
+prepend-path PATH $::env(ANDROID_SDK_ROOT)/tools
+prepend-path PATH $::env(ANDROID_SDK_ROOT)/tools/bin
+prepend-path PATH $::env(ANDROID_SDK_ROOT)/cmdline-tools/latest/bin
+
+# Set aliases for common commands
+set-alias adb "adb"
+set-alias sdkmanager "sdkmanager"
+set-alias avdmanager "avdmanager"
