@@ -49,6 +49,7 @@ ENV DONT_PROMPT_WSL_INSTALL=IS_THIS_NECESSARY
 
 # Expose the port (if applicable; adjust as needed)
 EXPOSE 6800
+EXPOSE 80
 
 # Clone the VoidEditor repository
 ARG USERNAME
