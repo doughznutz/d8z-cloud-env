@@ -1,17 +1,21 @@
-# How do use this stuff.
-# When you login to your cloud instance, you need to pull this repo.
-# CMD:
+# Doughznutz Development Environment
 
-# Once you've done that, you can build the d8z-cloud-container
-# CMD: docker build . -t d8z-cloud-container
+## Description
 
-# Then launch that container, in which you will now have better editing.
-# CMD: docker run -it --rm --env-file .env -v .:/work d8z-cloud-container bash
+This project contains the development environment for Doughznutz LLC. It utilizes Docker and open-source tools and can be run in either the cloud or locally. Hooks are provided for GitHub. Secrets, like API keys, are managed in cloud secrets or in .env files.
 
-# Open another SSH terminal so you have on inside the container, and one outside the container.  Your source code will be in "/work" directory.
+## Installation
 
-# You can edit this code in the docker container SSH, and rebuild it in the other SSH.  Then reload the container using the command:
+[Provide instructions on how to install and set up your project.  This would include any Docker setup, etc.]
 
-# Inside the container, cut and paste works through the SSH terminal. Highlight to copy, and ctrl+v to paste.
+## Usage
 
-# This file was written in emacs inside the container.
+[Provide instructions on how to use your project.  Describe how to run the development environment, etc.]
+
+## Contributing
+
+[Instructions for contributing to the project.]
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

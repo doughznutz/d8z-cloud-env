@@ -81,8 +81,8 @@ create_branch() {
     cd "$GITHUB_REPO"
 
     if [ "$1" == "clean" ]; then
-	echo "Cleaning files in repository."
-	rm ./*
+	      echo "Cleaning files in repository."
+	      rm ./*
     fi	
     
     # Set Git author information (fixes missing PR author issue)
