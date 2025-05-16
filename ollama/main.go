@@ -3,139 +3,195 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
+  "fmt"
+  "io"
 	"log"
 	"net/http"
 	"os"
 	"time"
 )
 
-const openAIURL = "http://api.openai.com/v1/chat/completions"
+const openaiURL = "https://api.openai.com/v1/chat/completions"
+
+var openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+
+// ==== Types ====
 
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type OllamaRequest struct {
-	Model      string        `json:"model"`
-	Messages   []ChatMessage `json:"messages"`
-	Temperature float64      `json:"temperature,omitempty"`
-	Stream     bool          `json:"stream,omitempty"`
-}
-
-type OpenAIRequest struct {
+type ChatRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
 	Stream      bool          `json:"stream"`
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST is allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req OllamaRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	openAIReq := OpenAIRequest{
-		Model:       req.Model,
-		Messages:    req.Messages,
-		Temperature: req.Temperature,
-		Stream:      req.Stream,
-	}
-
-	payload, err := json.Marshal(openAIReq)
-	if err != nil {
-		http.Error(w, "Failed to encode request", http.StatusInternalServerError)
-		return
-	}
-
-	openAIKey := os.Getenv("OPENAI_API_KEY")
-	if openAIKey == "" {
-		http.Error(w, "OPENAI_API_KEY not set", http.StatusInternalServerError)
-		return
-	}
-
-	client := &http.Client{
-		Timeout: time.Minute,
-	}
-
-	openAIRequest, _ := http.NewRequest("POST", openAIURL, bytes.NewReader(payload))
-	openAIRequest.Header.Set("Authorization", "Bearer "+openAIKey)
-	openAIRequest.Header.Set("Content-Type", "application/json")
-
-	openAIResp, err := client.Do(openAIRequest)
-	if err != nil {
-		http.Error(w, "Failed to call OpenAI API: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer openAIResp.Body.Close()
-
-	if req.Stream {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-
-		// Stream raw OpenAI chunks to client
-		buf := make([]byte, 1024)
-		for {
-			n, err := openAIResp.Body.Read(buf)
-			if n > 0 {
-				w.Write(buf[:n])
-				w.(http.Flusher).Flush()
-			}
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				log.Println("Stream error:", err)
-				break
-			}
-		}
-	} else {
-		// Buffer full response and extract content
-    type OpenAIResponse struct {
-      Choices []struct {
-        Text string `json:"text"`
-      } `json:"choices"`
-    }
-    var responseBody struct {
-			Choices []struct {
-				Text string `json:"text"`
-			} `json:"choices"`
-			//Created int64  `json:"created"`
-			//Model   string `json:"model"`
-		}
-
-		err = json.NewDecoder(openAIResp.Body).Decode(&responseBody)
-		if err != nil {
-      log.Printf("OpenAI response %v", openAIResp.Body)
-			http.Error(w, "Failed to parse OpenAI response", http.StatusInternalServerError)
-			return
-		}
-
-		response := map[string]interface{}{
-			"message": map[string]string{
-				"role":    "assistant",
-				//"content": responseBody.Choices[0].Message.Content,
-			},
-			//"created_at": responseBody.Created,
-			//"model":      responseBody.Model,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}
+type CompletionRequest struct {
+	Model       string  `json:"model"`
+	Prompt      string  `json:"prompt"`
+	Temperature float64 `json:"temperature"`
+	Stream      bool    `json:"stream"`
 }
 
+type ModelList struct {
+	Models []ModelEntry `json:"models"`
+}
+
+type ModelEntry struct {
+	Name       string `json:"name"`
+	ModifiedAt string `json:"modified_at"`
+	Size       int    `json:"size"`
+}
+
+type ShowResponse struct {
+	Model  string       `json:"model"`
+	Details ModelDetail `json:"details"`
+}
+
+type ModelDetail struct {
+	Parameters int    `json:"parameters"`
+	Family     string `json:"family"`
+	ModifiedAt string `json:"modified_at"`
+}
+
+// ==== Handlers ====
+
+func handleChat(w http.ResponseWriter, r *http.Request) {
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	openaiReq := map[string]interface{}{
+		"model":       req.Model,
+		"messages":    req.Messages,
+		"temperature": req.Temperature,
+		"stream":      req.Stream,
+	}
+
+	body, _ := json.Marshal(openaiReq)
+	httpReq, _ := http.NewRequest("POST", openaiURL, bytes.NewBuffer(body))
+	httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		http.Error(w, "openai request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleGenerate(w http.ResponseWriter, r *http.Request) {
+	var req CompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	chatFormat := map[string]interface{}{
+		"model": req.Model,
+		"messages": []ChatMessage{
+			{Role: "user", Content: req.Prompt},
+		},
+		"temperature": req.Temperature,
+		"stream":      req.Stream,
+	}
+
+	body, _ := json.Marshal(chatFormat)
+	httpReq, _ := http.NewRequest("POST", openaiURL, bytes.NewBuffer(body))
+	httpReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		http.Error(w, "openai request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+  log.Printf("OpenAI Response %v", resp)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleTags(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	models := ModelList{
+		Models: []ModelEntry{
+			{Name: "gpt-3.5-turbo", ModifiedAt: time.Now().Format(time.RFC3339), Size: 0},
+			{Name: "gpt-4", ModifiedAt: time.Now().Format(time.RFC3339), Size: 0},
+		},
+	}
+	json.NewEncoder(w).Encode(models)
+}
+
+func handleShow(w http.ResponseWriter, r *http.Request) {
+	model := r.URL.Query().Get("name")
+	if model == "" {
+		http.Error(w, "missing model name", http.StatusBadRequest)
+		return
+	}
+	resp := ShowResponse{
+		Model: model,
+		Details: ModelDetail{
+			Parameters: 0,
+			Family:     "openai",
+			ModifiedAt: time.Now().Format(time.RFC3339),
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func handleMockSuccess(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status": "success"}`))
+}
+
+func handleNotFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	resp := map[string]string{
+		"error":   fmt.Sprintf("endpoint not found: %v", r.URL.Path),
+		"method":  r.Method,
+		"path":    r.URL.Path,
+		"message": "This Ollama-compatible proxy does not support the requested API.",
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// ==== Main ====
+
 func main() {
-	http.HandleFunc("/api/chat", handler)
-	log.Println("Ollama proxy listening on :11434")
-	log.Fatal(http.ListenAndServe(":11434", nil))
-}
+	port := "11434"
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		port = envPort
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/chat/completions", handleChat)
+	mux.HandleFunc("/api/chat", handleChat)
+	mux.HandleFunc("/api/generate", handleGenerate)
+	mux.HandleFunc("/api/tags", handleTags)
+	mux.HandleFunc("/api/show", handleShow)
+	mux.HandleFunc("/api/delete", handleMockSuccess)
+	mux.HandleFunc("/api/pull", handleMockSuccess)
+
+  // Default route for unknown endpoints
+  mux.HandleFunc("/", handleNotFound)
+
+	log.Printf("Ollama proxy server running on :%s", port)
+	log.Fatal(http.ListenAndServe(":"+port, mux))
+}

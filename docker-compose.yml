@@ -74,10 +74,12 @@ services:
       context: ./voideditor
       args:
         USERNAME: ${USER}
+        PASSWORD: ${DOCKER_PASSWORD:-none}
     <<: *common # Inherit common configurations
     ports:
+       - "80:80"
 #      - "6080:80" # Web VNC
-      - "5900:5900" # VNC client
+#      - "5900:5900" # VNC client
     networks:
       - internal_net
 
@@ -109,8 +111,8 @@ services:
     <<: *common # Inherit common configurations
     networks:
       internal_net:
-        aliases:
-          - api.openai.com
+      #  aliases:
+      #    - api.openai.com
       external_net: {}
 
 networks:

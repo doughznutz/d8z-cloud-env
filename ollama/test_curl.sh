@@ -1,4 +1,4 @@
-curl http://localhost:11434/api/chat \
+curl http://ollama:11434/api/chat \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{
