@@ -76,12 +76,13 @@ services:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD:-none}
     <<: *common # Inherit common configurations
-    ports:
-       - "80:80"
+#    ports:
+#      - "80:80"
 #      - "6080:80" # Web VNC
 #      - "5900:5900" # VNC client
     networks:
       - internal_net
+      - external_net
 
   # Ollama service
   ollama:
