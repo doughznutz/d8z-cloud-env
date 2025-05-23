@@ -39,4 +39,5 @@ RUN usermod -aG sudo $USERNAME
 
 # Entrypoint for the container
 COPY *.conf /etc/supervisor/conf.d/
+RUN sed -i 's/^chmod=0[0-9][0-9][0-9]/chmod=0777/' /etc/supervisor/supervisord.conf
 CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

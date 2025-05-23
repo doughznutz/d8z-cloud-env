@@ -1,4 +1,4 @@
-curl http://ollama:11434/api/chat \
+curl http://ollama:11434/v1/chat/completions \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{
@@ -11,4 +11,19 @@ curl http://ollama:11434/api/chat \
     ],
     "temperature": 0.7,
     "stream": false
-  }'
+  }'
+
+curl http://ollama:11434/v1/chat/completions \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2.0-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "What is the capital of France?"
+      }
+    ],
+    "temperature": 0.7,
+    "stream": false
+  }'
