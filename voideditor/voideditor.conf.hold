@@ -1,0 +1,23 @@
+[supervisord]
+nodaemon=true
+
+[program:voideditor]
+command=/bin/bash -c '
+    while true; do
+        status=$(supervisorctl status x:novnc | awk "{print \$2}");
+        if [ "$status" = "RUNNING" ]; then
+            echo "vnc is RUNNING. Waiting a seconds...";
+            sleep 1;
+            break;
+        fi
+        sleep 1;
+    done;
+    void -add . '
+autostart=true
+autorestart=false
+user=%(ENV_USER)s
+directory=/home/%(ENV_USER)s/projects/%(ENV_D8Z_PROJECT)s
+stderr_logfile=/var/log/voideditor.err.log
+stdout_logfile=/var/log/voideditor.out.log
+
+

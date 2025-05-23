@@ -23,6 +23,10 @@ SERVICES += voideditor
 voideditor_BUILD_DEPS := dind
 voideditor_RUN_DEPS := base proxy ollama
 
+SERVICES += vscode
+vscode_BUILD_DEPS := dind
+vscode_RUN_DEPS := proxy ollama
+
 
 include dind/docker.mk
 

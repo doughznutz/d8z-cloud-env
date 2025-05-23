@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-  "fmt"
-  "io"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -47,7 +47,7 @@ type ModelEntry struct {
 }
 
 type ShowResponse struct {
-	Model  string       `json:"model"`
+	Model   string      `json:"model"`
 	Details ModelDetail `json:"details"`
 }
 
@@ -65,9 +65,9 @@ type OpenAIChatMessage struct {
 }
 
 type OpenAIChatRequest struct {
-	Model    string               `json:"model"`
+	Model    string              `json:"model"`
 	Messages []OpenAIChatMessage `json:"messages"`
-	Stream   bool                 `json:"stream"`
+	Stream   bool                `json:"stream"`
 }
 
 type GeminiPart struct {
@@ -89,53 +89,43 @@ type GeminiResponse struct {
 	} `json:"candidates"`
 }
 
-
 // ==== Handlers ====
 func handleChat(w http.ResponseWriter, r *http.Request) {
-	reqBody, err := io.ReadAll(r.Body)
-	if err != nil {
+	log.Printf("Received request: %v", r.Body)
+
+	// Create a buffer to store the body
+	var buf bytes.Buffer
+
+	// TeeReader copies the body to the buffer while reading
+	tee := io.TeeReader(r.Body, &buf)
+	var chatReq OpenAIChatRequest
+	if err := json.NewDecoder(tee).Decode(&chatReq); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	var bodyMap map[string]interface{}
-	err = json.Unmarshal(reqBody, &bodyMap)
-	if err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
+	// Restore the body for subsequent handlers
+	r.Body = io.NopCloser(&buf)
 
-	model, ok := bodyMap["model"].(string)
-	if !ok {
-		http.Error(w, "model not found", http.StatusBadRequest)
-		return
-	}
-
-	switch model {
-	case "gpt4.1":
-		handleOpenAIChat(w, r)
-	default:
+	switch chatReq.Model {
+	case "gemini-2.0-flash":
 		handleGeminiChat(w, r)
+	default:
+		handleOpenAIChat(w, r)
 	}
 }
 
 func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received OpenAI request: %v", r.Body)
 
-	reqBody, err := io.ReadAll(r.Body)
-	if err != nil {
+	var chatReq OpenAIChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	// Force stream to true
-	var bodyMap map[string]interface{}
-	if err := json.Unmarshal(reqBody, &bodyMap); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	bodyMap["stream"] = true
-	updatedReqBody, err := json.Marshal(bodyMap)
+	chatReq.Stream = true
+	updatedReqBody, err := json.Marshal(chatReq)
 	if err != nil {
 		http.Error(w, "failed to marshal updated request body", http.StatusInternalServerError)
 		return
@@ -182,26 +172,35 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received Gemini request: %v", r.Body)
+	//log.Printf("Received Gemini request: %v", r.Body)
 
-	var openAIReq OpenAIChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&openAIReq); err != nil {
+	var chatReq OpenAIChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
 	// Translate to Gemini request format
 	var geminiContents []GeminiContent
-	for _, msg := range openAIReq.Messages {
+	for _, msg := range chatReq.Messages {
+		role := msg.Role
+		if role != "user" && role != "model" && role != "tool" {
+			role = "user"
+		}
 		geminiContents = append(geminiContents, GeminiContent{
-			Role: msg.Role,
+			Role: role,
 			Parts: []GeminiPart{{
 				Text: msg.Content,
 			}},
 		})
 	}
 	geminiReq := GeminiRequest{Contents: geminiContents}
-	reqBody, _ := json.Marshal(geminiReq)
+	//log.Printf("Translated Gemini request: %+v", geminiReq)
+
+	reqBody, err := json.Marshal(geminiReq)
+	if err != nil {
+		log.Printf("Gemini JSON marshalling error: %v", err)
+	}
 
 	// Make request to Gemini
 	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiAPIKey
@@ -243,12 +242,12 @@ func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
 			"id":      "chatcmpl-gemini",
 			"object":  "chat.completion.chunk",
 			"created": 0,
-			"model":   openAIReq.Model,
+			"model":   chatReq.Model,
 			"choices": []map[string]interface{}{{
 				"delta": map[string]string{
 					"content": part.Text,
 				},
-				"index":        0,
+				"index":         0,
 				"finish_reason": nil,
 			}},
 		}
@@ -263,10 +262,8 @@ func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 }
 
-
-
 func handleGenerate(w http.ResponseWriter, r *http.Request) {
-  log.Printf("Received request: %v", r)
+	log.Printf("Received request: %v", r)
 	var req CompletionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -294,7 +291,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-  log.Printf("OpenAI Response %v", resp)
+	log.Printf("OpenAI Response %v", resp)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
@@ -302,7 +299,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTags(w http.ResponseWriter, r *http.Request) {
-  // log.Printf("Received request: %v", r)
+	// log.Printf("Received request: %v", r)
 	w.Header().Set("Content-Type", "application/json")
 	models := ModelList{
 		Models: []ModelEntry{
@@ -314,7 +311,7 @@ func handleTags(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleShow(w http.ResponseWriter, r *http.Request) {
-  log.Printf("Received request: %v", r)
+	log.Printf("Received request: %v", r)
 	model := r.URL.Query().Get("name")
 	if model == "" {
 		http.Error(w, "missing model name", http.StatusBadRequest)
@@ -333,13 +330,13 @@ func handleShow(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleMockSuccess(w http.ResponseWriter, r *http.Request) {
-  log.Printf("Received request: %v", r)
+	log.Printf("Received request: %v", r)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status": "success"}`))
 }
 
 func handleNotFound(w http.ResponseWriter, r *http.Request) {
-  log.Printf("Received request: %v", r)
+	log.Printf("Received request: %v", r)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
 	resp := map[string]string{
@@ -360,15 +357,15 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", handleGeminiChat)
+	mux.HandleFunc("/v1/chat/completions", handleChat)
 	mux.HandleFunc("/api/generate", handleGenerate)
 	mux.HandleFunc("/api/tags", handleTags)
 	mux.HandleFunc("/api/show", handleShow)
 	mux.HandleFunc("/api/delete", handleMockSuccess)
 	mux.HandleFunc("/api/pull", handleMockSuccess)
 
-  // Default route for unknown endpoints
-  mux.HandleFunc("/", handleNotFound)
+	// Default route for unknown endpoints
+	mux.HandleFunc("/", handleNotFound)
 
 	log.Printf("Ollama proxy server running on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
