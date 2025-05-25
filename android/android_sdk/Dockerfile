@@ -20,7 +20,7 @@ ARG COMMAND_LINE_TOOLS_URL
 RUN wget --no-check-certificate ${COMMAND_LINE_TOOLS_URL} -O /tmp/${COMMAND_LINE_TOOLS_FILENAME}
 
 # Start a new container and copy the files fetched above.
-FROM tools:base
+FROM android:base
 ARG COMMAND_LINE_TOOLS_VERSION
 ARG COMMAND_LINE_TOOLS_FILENAME
 COPY --from=fetcher /tmp/${COMMAND_LINE_TOOLS_FILENAME} /tmp/${COMMAND_LINE_TOOLS_FILENAME}

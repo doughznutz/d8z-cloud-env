@@ -11,22 +11,22 @@
 FROM ubuntu:latest
 
 # Install necessary dependencies
-RUN apt-get update
-RUN apt-get install -y \
-     	bash \
-	curl \
-	dos2unix \
-	emacs \
-	git \
-	jq \
-	openssh-client \
-	coreutils
+RUN apt-get update && \
+    apt-get install -y \
+    	bash \
+		curl \
+		dos2unix \
+		emacs \
+		git \
+		jq \
+		openssh-client \
+		coreutils
 
 RUN apt-get install -y \
 	apt-transport-https \
-    	ca-certificates \
-    	gnupg \
-    	lsb-release
+    ca-certificates \
+    gnupg \
+    lsb-release
 
 
 # Lets Run Docker in Docker, so we can launch the vnc.

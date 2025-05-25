@@ -42,8 +42,9 @@ RUN apt update && apt install bazel-8.0.0
 ENV BAZEL_VERSION=8.0.0
 ENV BAZEL_HOME=/usr/local/bazel
 
-# Copy this directory into the container.
-COPY . env/
+# This is to help track the Docker hierarchy, by copying the context to /docker/self
+RUN [ -d "/docker/self" ] && mv /docker/self /docker/self/parent || true
+COPY . /docker/self
 
 # Pickup shortcuts from this world.
 COPY ./bash_aliases bash_aliases

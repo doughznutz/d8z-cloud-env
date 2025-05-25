@@ -57,7 +57,7 @@ fetch_repo() {
     echo "Fetching the repo from github to $1"
 
     git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
-    diff "$GITHUB_REPO" "$1"
+    diff  "$GITHUB_REPO" "$1"
     cp -r "$GITHUB_REPO"/* "$1"/ || true
 }
 
@@ -70,7 +70,7 @@ diff_repo() {
     # Copy files from the source directory
     SOURCE_DIR="/src"
     echo "Diffing repo files from source directory: $SOURCE_DIR against $GITHUB_REPO"
-    diff "$SOURCE_DIR"/ "$GITHUB_REPO"/
+    diff -r "$SOURCE_DIR"/ "$GITHUB_REPO"/
 }
 
 # Function to create a new branch

@@ -16,7 +16,7 @@ RUN go mod tidy
 # Build the Go application
 # CGO_ENABLED=0 produces a statically-linked binary
 # -ldflags="-s -w" strips debugging information, reducing binary size
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o proxyapp .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o proxy .
 
 # Stage 2: Runner
 FROM ubuntu:latest
@@ -36,17 +36,15 @@ RUN mkdir -p /var/log/supervisor
 WORKDIR /app
 
 # Copy the compiled application binary from the builder stage
-COPY --from=builder /app/proxyapp .
+COPY --from=builder /app/proxy .
 COPY static/index.html /app/static/index.html
-# RUN chown appuser:appgroup /app/proxyapp && chmod +x /app/proxyapp
-
-# Copy the Supervisor configuration file
-COPY proxy-supervisor.conf /etc/supervisor/conf.d/proxy-supervisor.conf
+# RUN chown appuser:appgroup /app/proxy && chmod +x /app/proxy
 
 # Expose the ports the application listens on
 EXPOSE 8080
 EXPOSE 8081
 
-# Command to run Supervisor
-#CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
-CMD ["/app/proxyapp"]
+# Run Supervisor ???
+# COPY proxy.conf /etc/supervisor/conf.d/
+# CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["/app/proxy"]
