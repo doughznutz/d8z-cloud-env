@@ -38,11 +38,11 @@ services:
       - internal_net
 
   # Docker-in-Docker container
-  dind:
-    image: env:dind
-    container_name: dind
+  docker:
+    image: env:docker
+    container_name: docker
     build:
-      context: ./dind
+      context: ./docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # Share Docker socket
     <<: *common # Inherit common configurations
@@ -54,7 +54,7 @@ services:
     image: env:github
     container_name: github
     build:
-      context: .
+      context: .  # We check in the entire environment, so need visibility to .
       dockerfile: ./github/Dockerfile
     environment:
       - GITHUB_TOKEN=${GIT_D8Z_TOKEN:-none}
@@ -75,48 +75,36 @@ services:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD:-none}
     <<: *common # Inherit common configurations
-#    ports:
-#      - "80:80"
-#      - "6080:80" # Web VNC
-#      - "5900:5900" # VNC client
     networks:
       - internal_net
       - external_net
 
+  # VS Code container - VNC or code-server.
   vscode:
-    image: vscode
+    image: env:vscode
     container_name: vscode
     build:
       context: ./vscode
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD}
-    #privileged: true
-    #ports:
-    #  - 8080:8080  # Access: http://localhost:8080
+    ports:
+      - 8080:8080  # Access: http://localhost:8080
     <<: *common
-    # volumes:
-      # TODO: Change user from coder to ${USER}.
-      # - /tmp/.X11-unix:/tmp/.X11-unix
-      # - ./data:/home/${USER}/projects
     networks:
       - internal_net
-      - external_net
+      - external_net  # The code-server has issues with the proxy
 
 
-  # Ollama service
+  # Ollama service - No VNC, so pass in the keys here.
   ollama:
-    # image: env:ollama # Optionally tag the image built by compose
+    image: env:ollama
     container_name: ollama
     build:
       context: ./ollama
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-    #ports:
-    # - "80:80"     # Dashboard
-    # - "8080:8080" # Reverse Proxy port
-    # - "8081:8081" # Forward Proxy port
     <<: *common # Inherit common configurations
     networks:
       internal_net:
@@ -126,8 +114,8 @@ services:
 
   # Proxy service
   proxy:
-    # image: env:proxy # Optionally tag the image built by compose
-    container_name: proxy_app
+    image: env:proxy
+    container_name: proxy
     build:
       context: ./proxy
     ports:

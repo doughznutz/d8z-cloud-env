@@ -22,7 +22,7 @@ ARG EMULATOR_URL
 RUN wget --no-check-certificate ${EMULATOR_URL} -O /tmp/${EMULATOR_FILENAME}
 
 # Start a new container and copy the files fetched above.
-FROM android_sdk
+FROM android:sdk
 
 ARG EMULATOR_TAG
 ARG EMULATOR_PACKAGE
@@ -47,6 +47,7 @@ RUN unzip /tmp/${EMULATOR_FILENAME} -d $ANDROID_SDK_ROOT/system-images/android-3
 
 # Setup KVM
 ARG USERNAME
+RUN groupadd -f kvm
 RUN usermod -aG kvm $USERNAME
 #RUN chmod a+wr /dev/kvm
 

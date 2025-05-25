@@ -19,7 +19,7 @@ ARG ANDROID_STUDIO_URL
 RUN wget --no-check-certificate ${ANDROID_STUDIO_URL} -O /tmp/${ANDROID_STUDIO_FILENAME}
 
 # Start a new container and copy the files fetched above.
-FROM tools:base
+FROM android:base
 ARG ANDROID_STUDIO_VERSION
 ARG ANDROID_STUDIO_FILENAME
 ARG ANDROID_STUDIO_URL

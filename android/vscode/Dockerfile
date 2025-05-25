@@ -2,7 +2,7 @@
 # FILE: ~/docker/tools/vscode/Dockerfile
 
 # Use a prebuilt image and add stuff to it.
-FROM tools:base
+FROM android:base
 # FROM ubuntu:22.04
 
 # Install dependencies for adding the repo

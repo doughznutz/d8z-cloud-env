@@ -17,7 +17,7 @@ x-common: &common
 
 services:
   base:
-    image: tools:base
+    image: android:base
     container_name: base
     build:
       context: ./base  # Path to the directory containing the Dockerfile
@@ -34,7 +34,7 @@ services:
       - modules:/usr/share/modules/modulefiles
 
   flutter:
-    image: flutter
+    image: android:flutter
     container_name: flutter
     build:
       context: ./flutter
@@ -51,7 +51,7 @@ services:
 
 
   android_studio:
-    image: android_studio
+    image: android:studio
     container_name: android_studio
     build:
       context: ./android_studio
@@ -71,7 +71,7 @@ services:
       - modules:/usr/share/modules/modulefiles
 
   android_sdk:
-    image: android_sdk
+    image: android:sdk
     container_name: android_sdk
     build:
       context: ./android_sdk
@@ -89,7 +89,7 @@ services:
       - modules:/usr/share/modules/modulefiles
 
   android_emulator:
-    image: android_emulator
+    image: android:emulator
     container_name: android_emulator
     build:
       context: ./android_emulator
@@ -112,8 +112,8 @@ services:
       - google:/opt/google
       - modules:/usr/share/modules/modulefiles
 
-  android-emulator-ots:
-    image: budtmo/docker-android
+  android_emulator_ots:
+    image: budtmo/docker-android   # Prebuilt image - Off The Shelf
     container_name: android-emulator
     privileged: true
     ports:
@@ -127,25 +127,9 @@ services:
     networks:
       - dev-network
 
-  voideditor:
-    build:
-      context: ./voideditor
-      dockerfile: Dockerfile
-      args:
-        USERNAME: ${USER}
-        PASSWORD: ${DOCKER_PASSWORD}
-    container_name: voideditor
-    <<: *common
-    ports:
-      - "6080:80"          # Web VNC
-      - "5900:5900"        # VNC client
-    volumes:
-      - ./data:/home/${USER}/projects   # Mount your local data folder
-      - .:/home/${USER}/projects/env    # Mount your local data folder
-
   vscode:
-    image: vscode
-    container_name: vscode
+    image: android:vscode
+    container_name: vscode-android
     build:
       context: ./vscode
       args:

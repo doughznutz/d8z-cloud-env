@@ -22,7 +22,7 @@ RUN curl -o /tmp/flutter_linux_3.27.3-stable.tar.xz \
 
 
 # Start a new container and copy the files fetched above.
-FROM tools:base
+FROM android:base
 COPY --from=fetcher /usr/share/keyrings/cloud.google.gpg /usr/share/keyrings/cloud.google.gpg
 COPY --from=fetcher /etc/apt/sources.list.d/google-cloud-sdk.list /etc/apt/sources.list.d/google-cloud-sdk.list 
 COPY --from=fetcher /tmp/flutter_linux_3.27.3-stable.tar.xz /tmp/flutter_linux_3.27.3-stable.tar.xz
