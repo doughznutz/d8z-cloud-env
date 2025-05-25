@@ -82,7 +82,7 @@ create_branch() {
 
     if [ "$1" == "clean" ]; then
 	      echo "Cleaning files in repository."
-	      rm ./*
+	      rm -rf ./*
     fi	
     
     # Set Git author information (fixes missing PR author issue)
