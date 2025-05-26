@@ -30,3 +30,10 @@ vscode_RUN_DEPS := proxy ollama
 
 include docker/docker.mk
 
+.PHONY: branch
+branch:
+	docker compose run github create_branch clean
+
+.PHONY: pull_request
+pull_request:
+	docker compose run github create_pull_request $(BRANCH)

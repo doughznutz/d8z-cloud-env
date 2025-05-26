@@ -1,9 +1,9 @@
 # ---------- Stage 1: Build ----------
-FROM golang:1.21 as builder
+FROM golang:1.21 AS builder
 
 WORKDIR /app
-COPY main.go .
-RUN go build -o ollama-proxy main.go
+COPY *.go .
+RUN go build -o ollama-proxy main.go gemini.go openai.go handlers.go
 
 # ---------- Stage 2: Runtime ----------
 FROM ubuntu:22.04
