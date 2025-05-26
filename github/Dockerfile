@@ -29,31 +29,10 @@ RUN apt-get install -y \
     lsb-release
 
 
-# Lets Run Docker in Docker, so we can launch the vnc.
-
-# Add Docker's official GPG key
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-
-# Set up the stable Docker repository
-RUN echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# Update package lists again after adding the Docker repository
-RUN apt-get update
-
-# Install Docker CLI
-RUN apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io
 
 # Clean up unnecessary packages
 RUN apt-get autoremove -y && apt-get clean
 RUN rm -rf /var/lib/apt/lists/*
-
-# Install docker-compose
-RUN mkdir -p /usr/libexec/docker/cli-plugins
-RUN curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 \
-         -o /usr/libexec/docker/cli-plugins/docker-compose	 
-RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # Copy the source code from the project directory.
 COPY ./ /src
