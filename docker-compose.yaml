@@ -103,6 +103,7 @@ services:
     build:
       context: ./ollama
     environment:
+      - POSTGRES_PASSWORD=${DOCKER_PASSWORD:-none}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     <<: *common # Inherit common configurations
@@ -126,6 +127,31 @@ services:
       #  aliases:
       #    - api.openai.com
       external_net: {}
+
+  postgres:
+    image: postgres
+    container_name: postgres
+    build: 
+      context: ./postgres
+    environment:
+      POSTGRES_USER: ${USER}
+      POSTGRES_PASSWORD: ${DOCKER_PASSWORD:-none}
+      POSTGRES_DB: openai_logs
+    #ports:
+    #  - "5432:5432"
+    volumes:
+      - ${HOME}/AIjournal:/var/lib/postgresql/data
+    networks:
+      - internal_net
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8082:8080
+    networks:
+      - internal_net
+      - external_net
 
 networks:
   internal_net:

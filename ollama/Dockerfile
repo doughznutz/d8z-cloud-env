@@ -2,8 +2,22 @@
 FROM golang:1.21 AS builder
 
 WORKDIR /app
-COPY *.go .
-RUN go build -o ollama-proxy main.go gemini.go openai.go handlers.go
+# Copy the Go source code
+COPY ./*.go .
+
+# Initialize go module if go.mod doesn't exist (useful for standalone main.go)
+# If you have go.mod and go.sum, these RUN lines can be replaced with:
+# COPY go.mod go.sum ./
+# RUN go mod download
+RUN go mod init ollama-proxy || true 
+RUN go mod tidy
+
+# Build the Go application
+# CGO_ENABLED=0 produces a statically-linked binary
+# -ldflags="-s -w" strips debugging information, reducing binary size
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o ollama-proxy .
+
+#    go build -o ollama-proxy main.go gemini.go openai.go handlers.go postgres.go
 
 # ---------- Stage 2: Runtime ----------
 FROM ubuntu:22.04

@@ -98,10 +98,13 @@ func main() {
 		r.Handle("/", http.FileServer(http.Dir("./static")))
 		r.Handle("/env/*", ReverseProxy("http://base", "/env"))
 		r.Handle("/docker/*", ReverseProxy("http://docker", "/docker"))
+		r.Handle("/pgadmin/*", ReverseProxy("http://pgadmin", "/pgadmin"))
 		r.Handle("/voideditor/*", ReverseProxy("http://voideditor", "/voideditor"))
 		r.Handle("/vscode/*", ReverseProxy("http://vscode", "/vscode"))
         // code-server has issues going through the proxy, so use http://localhost:8080
         // r.Handle("/vscode-server/*", ReverseProxy("http://vscode:8080", "/vscode-server"))
+		//r.Handle("/adminer/*", ReverseProxy("http://adminer", "/adminer"))
+
 
 
 		log.Println("Reverse proxy listening on :80")

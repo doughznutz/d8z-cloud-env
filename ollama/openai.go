@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"time"
 	"net/http"
 )
 
@@ -87,13 +88,13 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatReq.Stream = true
-	updatedReqBody, err := json.Marshal(chatReq)
+	chatReqBody, err := json.Marshal(chatReq)
 	if err != nil {
-		http.Error(w, "failed to marshal updated request body", http.StatusInternalServerError)
+		http.Error(w, "failed to marshal chat request body", http.StatusInternalServerError)
 		return
 	}
 
-	openaiReq, err := http.NewRequest("POST", openaiURL, bytes.NewBuffer(updatedReqBody))
+	openaiReq, err := http.NewRequest("POST", openaiURL, bytes.NewBuffer(chatReqBody))
 	if err != nil {
 		http.Error(w, "failed to create OpenAI request", http.StatusInternalServerError)
 		return
@@ -122,6 +123,17 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	// Copy the response stream to the client
+	// Read the entire response body
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response body: %v", err)
+		http.Error(w, "Error reading response from OpenAI", http.StatusInternalServerError)
+		return
+	}
+
+	// Restore the original response body for streaming
+	resp.Body = io.NopCloser(bytes.NewBuffer(responseBody))
+
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
 		log.Printf("Error copying stream: %v", err)
@@ -130,6 +142,19 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	// Ensure the connection is closed
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
+	}
+
+	dbEntry := &OpenAILog {
+		Timestamp: time.Now(),
+		UserID: "doughznutz",  // Replace with reverse DNS of container requesting.
+		Model: chatReq.Model,
+		Request: chatReqBody,
+		Response: responseBody,
+	}
+
+	// This function shouldnt bother returning...just log the error inside it.
+	if err := insert_into_openai_logs(dbEntry); err != nil {
+		log.Printf("Error inserting into database: %v", err)
 	}
 }
 
