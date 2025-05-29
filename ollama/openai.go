@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"time"
@@ -52,7 +54,43 @@ type OpenAIChatRequest struct {
 	Stream   bool                `json:"stream"`
 }
 
+type OpenAIChatStream struct {
+	Data []OpenAIChatResponse       `json:"data"`
+}
+type OpenAIChatResponse struct {
+	ID      string                  `json:"id"`
+	Object  string                  `json:"object"`
+	Created int64                   `json:"created"`
+	Choices []OpenAIChatChoice      `json:"choices"`
+	Usage   OpenAIChatCompletionUsage `json:"usage"`
+}
+type OpenAIChatChoice struct {
+	Index        int              `json:"index"`
+	FinishReason string           `json:"finish_reason"`
+	Delta        OpenAIChatMessage `json:"delta"`	
+	Message      OpenAIChatMessage `json:"message"`
 
+}
+
+type OpenAIChatCompletionUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type OpenAIStreamResponse struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	Model   string `json:"model"`
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+		Index int `json:"index"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+}
 // ==== Handlers ====
 func handleOpenAICompletions(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received V1/Completion request: %v", r.Body)
@@ -78,16 +116,41 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Override, I think this is a voideditor bug for Ollama
+	chatReq.Stream = true
+
+	// Start the database log entry
+	dbEntry := &OpenAILog {
+		Timestamp: time.Now(),
+		UserID: "doughznutz",  // Replace with reverse DNS of container requesting.
+		Model: chatReq.Model,
+	}
+	var err error
+	dbEntry.Request, err = json.Marshal(chatReq)
+	if err != nil {
+		log.Println("Error marshalling chatReq to JSON:", err)
+	}
+
 	// Branch off here to Gemini baed on chatReq.Model
 	if chatReq.Model == "gemini-2.0-flash" {
 		geminiReq := OpenAIChatToGemini(chatReq)
 		geminiResp, err := makeRequestToGemini(w, geminiReq)
 		if err != nil {return}
     	streamGeminiToOpenAIChat(w, geminiResp)
+
+		// We need to convert this to openAIchat response.
+		dbEntry.Response, err = json.Marshal(geminiResp)
+		if err != nil {
+			log.Println("Error marshalling geminiReq to JSON:", err)
+		}
+	
+		// This function shouldnt bother returning...just log the error inside it.
+		if err := insert_into_openai_logs(dbEntry); err != nil {
+			log.Printf("Error inserting into database: %v", err)
+		}
 		return
 	}
 
-	chatReq.Stream = true
 	chatReqBody, err := json.Marshal(chatReq)
 	if err != nil {
 		http.Error(w, "failed to marshal chat request body", http.StatusInternalServerError)
@@ -144,13 +207,41 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 
-	dbEntry := &OpenAILog {
-		Timestamp: time.Now(),
-		UserID: "doughznutz",  // Replace with reverse DNS of container requesting.
-		Model: chatReq.Model,
-		Request: chatReqBody,
-		Response: responseBody,
+	//scanner := bufio.NewScanner(resp.Body)
+	openAIChatResponse := OpenAIChatResponse{}
+	scanner := bufio.NewScanner(bytes.NewBuffer(responseBody))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if bytes.HasPrefix([]byte(line), []byte("data: ")) {
+			data := bytes.TrimPrefix([]byte(line), []byte("data: "))
+			var response OpenAIChatResponse
+			if err := json.Unmarshal(data, &response); err != nil {
+				log.Printf("Error unmarshaling data: %v", err)
+				continue
+			}
+			if openAIChatResponse.ID == "" {
+				openAIChatResponse = response
+			} else {
+				openAIChatResponse.Choices[0].Delta.Content += response.Choices[0].Delta.Content
+			}
+		} else if line == "" {
+			// Heartbeat or empty line
+			continue
+		} else {
+			// Other lines (e.g., comments)
+			log.Printf("Ignoring line: %s", line)
+		}
 	}
+
+	fmt.Printf("Received: %+v\n", openAIChatResponse)
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error reading stream: %v", err)
+	}	
+	dbEntry.Response, err = json.Marshal(openAIChatResponse)
+	if err != nil {
+		log.Println("Error marshalling OpenAIChatResponse to JSON:", err)
+	}
+	
 
 	// This function shouldnt bother returning...just log the error inside it.
 	if err := insert_into_openai_logs(dbEntry); err != nil {
