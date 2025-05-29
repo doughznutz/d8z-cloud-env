@@ -57,7 +57,8 @@ RUN code --install-extension Continue.continue \
 
 
 # Install the Continue extension
-RUN code-server --install-extension Continue.continue
+RUN code-server --install-extension Continue.continue \
+    && code-server --install-extension golang.go
 
 USER root
 

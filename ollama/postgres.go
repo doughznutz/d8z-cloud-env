@@ -18,6 +18,14 @@ type OpenAILog struct {
     Request   []byte
     Response  []byte
 }
+// Generic []byte to JSON string conversion
+func byteToString(data []byte) string {
+	if !json.Valid(data) {
+		log.Println("Invalid JSON data")
+		return ""
+	}
+	return string(data)
+}
 
 func insert_into_openai_logs(dbEntry *OpenAILog) error {
 	// Connection details
@@ -26,13 +34,18 @@ func insert_into_openai_logs(dbEntry *OpenAILog) error {
 	user := "doughznutz"
 	password := os.Getenv("POSTGRES_PASSWORD")
 	dbname := "openai_logs"
+ 
+    /* Debug code:
+    log.Printf("Attempting to insert into database\n%s\n%s\n", 
+        dbEntryRequestJSON, 
+        dbEntryResponseJSON,
+    )
+    */
 
-	psqlInfo := fmt.Sprintf(
+    psqlInfo := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname,
 	)
-
-    log.Printf("Attempting to insert into database: %v", dbEntry)
 
 	// Connect
 	db, err := sql.Open("postgres", psqlInfo)
@@ -52,30 +65,18 @@ func insert_into_openai_logs(dbEntry *OpenAILog) error {
         VALUES ($1, $2, $3, $4)`,
         dbEntry.UserID, 
         dbEntry.Model, 
-        //dbEntry.Request, 
-        //dbEntry.Response,
-        func() string {
-            b, err := json.Marshal(dbEntry.Request)
-            if err != nil {
-                log.Printf("Error marshaling to JSON: %v", err)
-                return ""
-            }
-            return string(b)
-        }(),
-        func() string {
-            b, err := json.Marshal(dbEntry.Response)
-            if err != nil {
-                log.Printf("Error marshaling to JSON: %v", err)
-                return ""
-            }
-            return string(b)
-        }(),        
+        byteToString(dbEntry.Request), 
+        byteToString(dbEntry.Response),
     )
     if err != nil {
         return(err)
     }
 
-    log.Printf("Inserted into database: %v", dbEntry)
+    log.Printf("Inserted into database:\n%s\n%s\n", 
+        byteToString(dbEntry.Request), 
+        byteToString(dbEntry.Response),
+    )
+
 	// Insert
     /*
 	sqlStatement := `INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id`
@@ -89,9 +90,4 @@ func insert_into_openai_logs(dbEntry *OpenAILog) error {
     */
     return nil
 }
-
-
-
-
-
 
