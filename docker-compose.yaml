@@ -37,6 +37,21 @@ services:
     networks:
       - internal_net
 
+  # Dashboard
+  dashboard:
+    image: env:dashboard
+    container_name: dashboard
+    build:
+      context: ./dashboard
+    ports:
+      - "80:80"     # http://localhost
+    <<: *common # Inherit common configurations
+    networks:
+      internal_net:
+      #  aliases:
+      #    - api.openai.com
+      external_net: {}
+
   # Docker-in-Docker container
   docker:
     image: env:docker
@@ -48,6 +63,20 @@ services:
     <<: *common # Inherit common configurations
     networks:
       - internal_net
+
+  # A Docker Log watcher.
+  dozzle:
+    image: amir20/dozzle
+    container_name: dozzle
+    ports:
+      - "8083:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    #restart: unless-stopped
+    networks:
+      - internal_net
+      - external_net
+
 
   # Github container
   github:
@@ -113,23 +142,19 @@ services:
           - 127.0.0.1
       external_net: {}
 
-  # Proxy service
-  proxy:
-    image: env:proxy
-    container_name: proxy
-    build:
-      context: ./proxy
+
+# Database and DB admin.
+  adminer:
+    image: adminer
+    # restart: always
     ports:
-      - "80:80"     # Dashboard
-    <<: *common # Inherit common configurations
+      - 8082:8080
     networks:
-      internal_net:
-      #  aliases:
-      #    - api.openai.com
-      external_net: {}
+      - internal_net
+      - external_net
 
   postgres:
-    image: postgres
+    image: env:postgres
     container_name: postgres
     build: 
       context: ./postgres
@@ -144,14 +169,6 @@ services:
     networks:
       - internal_net
 
-  adminer:
-    image: adminer
-    restart: always
-    ports:
-      - 8082:8080
-    networks:
-      - internal_net
-      - external_net
 
 networks:
   internal_net:

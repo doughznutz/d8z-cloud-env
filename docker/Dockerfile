@@ -1,7 +1,7 @@
 # FILE: env/docker/Dockerfile
 
 # Use doughznutz base ubuntu image
-FROM env:base
+FROM ubuntu:latest
 
 # Install Docker tools
 RUN apt-get update && apt-get install -y \
