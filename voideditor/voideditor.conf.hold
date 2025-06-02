@@ -16,7 +16,7 @@ command=/bin/bash -c '
 autostart=true
 autorestart=false
 user=%(ENV_USER)s
-directory=/home/%(ENV_USER)s/projects/%(ENV_D8Z_PROJECT)s
+directory=/home/%(ENV_USER)s/projects/%(ENV_PROJECT)s
 stderr_logfile=/var/log/voideditor.err.log
 stdout_logfile=/var/log/voideditor.out.log
 

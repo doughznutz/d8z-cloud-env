@@ -2,8 +2,11 @@
 x-common: &common
   environment:
     - USER=${USER}
-    - PASSWORD=${DOCKER_PASSWORD:-none} # Use environment variable or default
-    - D8Z_PROJECT=env
+    # Use environment variable or default
+    - VNC_PASSWORD=${DOCKER_PASSWORD:-none}
+    - PASSWORD=${DOCKER_PASSWORD:-none} 
+    - CODE_SERVER_PASSWORD=${DOCKER_PASSWORD:-none}
+    - PROJECT=env
     - DISPLAY=:1
     - RESOLUTION=2500x1500             # Desktop monitor
 #    - RESOLUTION=1920x1080             # Desktop monitor
@@ -16,7 +19,7 @@ x-common: &common
 services:
   # Base container - builds the base image
   base:
-    image: env:base
+    image: ${PROJECT:-env}:base
     container_name: base
     build:
       context: ./base
@@ -108,7 +111,7 @@ services:
       - internal_net
       - external_net
 
-  # VS Code container - VNC or code-server.
+  # VSCode container - VNC
   vscode:
     image: env:vscode
     container_name: vscode
@@ -124,6 +127,22 @@ services:
       - internal_net
       - external_net  # The code-server has issues with the proxy
 
+
+# VSCode-server container - VNC
+  vscodecloud:
+    image: env:vscodecloud
+    container_name: vscodecloud
+    build:
+      context: ./vscodecloud
+      args:
+        USERNAME: ${USER}
+        PASSWORD: ${DOCKER_PASSWORD}
+    ports:
+      - 8081:8080  # Access: http://localhost:8080
+    <<: *common
+    networks:
+      - internal_net
+      - external_net  # The code-server has issues with the proxy
 
   # Ollama service - No VNC, so pass in the keys here.
   ollama:
