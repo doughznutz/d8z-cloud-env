@@ -32,15 +32,15 @@ SERVICES += voideditor
 voideditor_BUILD_DEPS := base
 voideditor_RUN_DEPS := dashboard ollama
 
-# Vscode (vnc) using Continue plug-in Agent.
+# Both vscode (vnc) and code-server (web) using Continue plug-in Agent.
 SERVICES += vscode
 vscode_BUILD_DEPS := base
 vscode_RUN_DEPS := dashboard ollama
 
-# Both vscode (vnc) and code-server (web) using Continue plug-in Agent.
-SERVICES += vscode-server
-vscode_BUILD_DEPS :=
-vscode_RUN_DEPS := dashboard ollama
+# Vscode-server (web) using Continue plug-in Agent.
+SERVICES += vscodecloud
+vscodecloud_BUILD_DEPS :=
+vscodecloud_RUN_DEPS := dashboard ollama
 
 include docker/docker.mk
 

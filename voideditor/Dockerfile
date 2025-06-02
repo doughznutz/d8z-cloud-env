@@ -58,5 +58,5 @@ USER $USERNAME
 
 # Set the default command to start VoidEditor
 USER root
-COPY *.conf /etc/supervisor/conf.d/
-CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+#COPY *.conf /etc/supervisor/conf.d/
+#CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
