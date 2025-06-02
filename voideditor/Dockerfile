@@ -40,7 +40,7 @@ RUN npm run gulp vscode-linux-x64
 
 # Switch to a VNC based docker image.
 #FROM dorowu/ubuntu-desktop-lxde-vnc
-FROM env:docker
+FROM env:base
 COPY --from=builder /VSCode-linux-x64 /usr/bin/voideditor
 ENV PATH=/usr/bin/voideditor/bin:$PATH
 
@@ -54,7 +54,7 @@ EXPOSE 80
 # Clone the VoidEditor repository
 ARG USERNAME
 USER $USERNAME
-RUN git clone https://github.com/voideditor/void.git /home/$USERNAME/projects/voideditor
+#RUN git clone https://github.com/voideditor/void.git /home/$USERNAME/projects/voideditor
 
 # Set the default command to start VoidEditor
 USER root
