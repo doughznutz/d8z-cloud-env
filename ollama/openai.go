@@ -1,75 +1,44 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
-	"time"
 	"net/http"
+	"time"
 )
 
 const openaiURL = "https://api.openai.com/v1/chat/completions"
+const groqURL = "https://api.groq.com/openai/v1/chat/completions"
 
-// OpenAI v1/completions-style legacy
-type OpenAICompletionRequest struct {
-	Prompt     string  `json:"prompt"`
-	MaxTokens  int     `json:"max_tokens,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-}
-
-type OpenAICompletionResponse struct {
-	ID      string                     `json:"id"`
-	Object  string                     `json:"object"`
-	Created int64                      `json:"created"`
-	Model   string                     `json:"model"`
-	Choices []OpenAICompletionChoice   `json:"choices"`
-	Usage   OpenAICompletionUsage      `json:"usage"`
-}
-
-type OpenAICompletionChoice struct {
-	Text         string      `json:"text"`
-	Index        int         `json:"index"`
-	Logprobs     interface{} `json:"logprobs"` // Always null in completions
-	FinishReason string      `json:"finish_reason"`
-}
-
-type OpenAICompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-
-type OpenAIChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
+// OpenAIChatRequest is the JSON structure for requests to OpenAI
 type OpenAIChatRequest struct {
 	Model    string              `json:"model"`
 	Messages []OpenAIChatMessage `json:"messages"`
 	Stream   bool                `json:"stream"`
 }
-
-type OpenAIChatStream struct {
-	Data []OpenAIChatResponse       `json:"data"`
+type OpenAIChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
+
+// OpenAIChatResponse is the JSON structure for what is returned from OpenAI
 type OpenAIChatResponse struct {
-	ID      string                  `json:"id"`
-	Object  string                  `json:"object"`
-	Created int64                   `json:"created"`
-	Choices []OpenAIChatChoice      `json:"choices"`
-	Usage   OpenAIChatCompletionUsage `json:"usage"`
+	ID                string                    `json:"id"`
+	Object            string                    `json:"object"`
+	Created           int64                     `json:"created"`
+	Model             string                    `json:"model"`
+	SystemFingerprint string                    `json:"system_fingerprint,omitempty"`
+	Choices           []OpenAIChatChoice        `json:"choices"`
+	Usage             OpenAIChatCompletionUsage `json:"usage"`
 }
 type OpenAIChatChoice struct {
-	Index        int              `json:"index"`
-	FinishReason string           `json:"finish_reason"`
-	Delta        OpenAIChatMessage `json:"delta"`	
+	Index        int               `json:"index"`
+	FinishReason string            `json:"finish_reason"`
+	Delta        OpenAIChatMessage `json:"delta"`
 	Message      OpenAIChatMessage `json:"message"`
-
+	Logprobs     interface{}       `json:"logprobs"`
 }
 
 type OpenAIChatCompletionUsage struct {
@@ -78,34 +47,7 @@ type OpenAIChatCompletionUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-type OpenAIStreamResponse struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
-		Index int `json:"index"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-}
 // ==== Handlers ====
-func handleOpenAICompletions(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received V1/Completion request: %v", r.Body)
-
-	var completionReq OpenAICompletionRequest
-	if err := json.NewDecoder(r.Body).Decode(&completionReq); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-
-	geminiReq := OpenAICompletionsToGemini(completionReq)
-	geminiResp, err := makeRequestToGemini(w, geminiReq)
-	if err != nil {return}
-    sendGeminiToOpenAICompletion(w, geminiResp)
-}
 
 func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received V1/Chat/Completion request: %v", r.Body)
@@ -117,13 +59,13 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Override, I think this is a voideditor bug for Ollama
-	chatReq.Stream = true
+	// chatReq.Stream = true
 
 	// Start the database log entry
-	dbEntry := &OpenAILog {
+	dbEntry := &OpenAILog{
 		Timestamp: time.Now(),
-		UserID: "doughznutz",  // Replace with reverse DNS of container requesting.
-		Model: chatReq.Model,
+		UserID:    "doughznutz", // Replace with reverse DNS of container requesting.
+		Model:     chatReq.Model,
 	}
 	var err error
 	dbEntry.Request, err = json.Marshal(chatReq)
@@ -135,15 +77,17 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	if chatReq.Model == "gemini-2.0-flash" {
 		geminiReq := OpenAIChatToGemini(chatReq)
 		geminiResp, err := makeRequestToGemini(w, geminiReq)
-		if err != nil {return}
-    	streamGeminiToOpenAIChat(w, geminiResp)
+		if err != nil {
+			return
+		}
+		streamGeminiToOpenAIChat(w, geminiResp)
 
 		// We need to convert this to openAIchat response.
 		dbEntry.Response, err = json.Marshal(geminiResp)
 		if err != nil {
 			log.Println("Error marshalling geminiReq to JSON:", err)
 		}
-	
+
 		// This function shouldnt bother returning...just log the error inside it.
 		if err := insert_into_openai_logs(dbEntry); err != nil {
 			log.Printf("Error inserting into database: %v", err)
@@ -157,13 +101,18 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	openaiReq, err := http.NewRequest("POST", openaiURL, bytes.NewBuffer(chatReqBody))
+	reqURL, reqAPIKey := openaiURL, openaiAPIKey
+	if chatReq.Model == "llama-3.3-70b-versatile" {
+		reqURL, reqAPIKey = groqURL, groqAPIKey
+	}
+
+	openaiReq, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(chatReqBody))
 	if err != nil {
-		http.Error(w, "failed to create OpenAI request", http.StatusInternalServerError)
+		http.Error(w, "failed to create request", http.StatusInternalServerError)
 		return
 	}
 
-	openaiReq.Header.Set("Authorization", "Bearer "+openaiAPIKey)
+	openaiReq.Header.Set("Authorization", "Bearer "+reqAPIKey)
 	openaiReq.Header.Set("Content-Type", "application/json")
 	openaiReq.Header.Set("Accept", "text/event-stream") // Important for SSE
 
@@ -185,67 +134,30 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Copy the response stream to the client
-	// Read the entire response body
-	responseBody, err := io.ReadAll(resp.Body)
+	var buf bytes.Buffer
+	mw := io.MultiWriter(w, &buf)
+
+	// Copy the response stream to the client and buffer
+	_, err = io.Copy(mw, resp.Body)
 	if err != nil {
-		log.Printf("Error reading response body: %v", err)
-		http.Error(w, "Error reading response from OpenAI", http.StatusInternalServerError)
+		log.Printf("Error copying stream: %v", err)
 		return
 	}
 
-	// Restore the original response body for streaming
-	resp.Body = io.NopCloser(bytes.NewBuffer(responseBody))
-
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
-		log.Printf("Error copying stream: %v", err)
-	}
-
-	// Ensure the connection is closed
+	// Ensure the connection is closed and buffer flushed
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
 
-	//scanner := bufio.NewScanner(resp.Body)
-	openAIChatResponse := OpenAIChatResponse{}
-	scanner := bufio.NewScanner(bytes.NewBuffer(responseBody))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if bytes.HasPrefix([]byte(line), []byte("data: ")) {
-			data := bytes.TrimPrefix([]byte(line), []byte("data: "))
-			var response OpenAIChatResponse
-			if err := json.Unmarshal(data, &response); err != nil {
-				log.Printf("Error unmarshaling data: %v", err)
-				continue
-			}
-			if openAIChatResponse.ID == "" {
-				openAIChatResponse = response
-			} else {
-				openAIChatResponse.Choices[0].Delta.Content += response.Choices[0].Delta.Content
-			}
-		} else if line == "" {
-			// Heartbeat or empty line
-			continue
-		} else {
-			// Other lines (e.g., comments)
-			log.Printf("Ignoring line: %s", line)
-		}
-	}
-
-	fmt.Printf("Received: %+v\n", openAIChatResponse)
-	if err := scanner.Err(); err != nil {
-		log.Fatalf("Error reading stream: %v", err)
-	}	
-	dbEntry.Response, err = json.Marshal(openAIChatResponse)
+	// Log the entire response
+	//dbEntry.Response = buf.Bytes()
+	dbEntry.Response, err = stream_into_openai_logs(buf)
 	if err != nil {
 		log.Println("Error marshalling OpenAIChatResponse to JSON:", err)
 	}
-	
 
 	// This function shouldnt bother returning...just log the error inside it.
 	if err := insert_into_openai_logs(dbEntry); err != nil {
 		log.Printf("Error inserting into database: %v", err)
 	}
 }
-

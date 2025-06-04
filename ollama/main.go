@@ -8,6 +8,7 @@ import (
 
 var openaiAPIKey = os.Getenv("OPENAI_API_KEY")
 var geminiAPIKey = os.Getenv("GEMINI_API_KEY")
+var groqAPIKey = os.Getenv("GROQ_API_KEY")
 
 // ==== Main ====
 func main() {
@@ -18,12 +19,13 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", handleOpenAIChat)
-	mux.HandleFunc("/v1/completions", handleOpenAICompletions)
-	mux.HandleFunc("/api/generate", handleGenerate)
+	//mux.HandleFunc("/v1/chat/completions", handleGroqChat)
+	//mux.HandleFunc("/v1/completions", handleOpenAICompletions)
+	//mux.HandleFunc("/api/generate", handleGenerate)
 	mux.HandleFunc("/api/tags", handleTags)
 	mux.HandleFunc("/api/show", handleShow)
-	mux.HandleFunc("/api/delete", handleMockSuccess)
-	mux.HandleFunc("/api/pull", handleMockSuccess)
+	//mux.HandleFunc("/api/delete", handleMockSuccess)
+	//mux.HandleFunc("/api/pull", handleMockSuccess)
 
 	// Default route for unknown endpoints
 	mux.HandleFunc("/", handleNotFound)

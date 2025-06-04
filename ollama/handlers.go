@@ -11,7 +11,7 @@ import (
 )
 
 // handleTags reports what models are available.
-// TODO: Only tell the models that are enabled by the keys available. 
+// TODO: Only tell the models that are enabled by the keys available.
 type ModelList struct {
 	Models []ModelEntry `json:"models"`
 }
@@ -29,12 +29,11 @@ func handleTags(w http.ResponseWriter, r *http.Request) {
 		Models: []ModelEntry{
 			{Name: "gemini-2.0-flash", ModifiedAt: time.Now().Format(time.RFC3339), Size: 0},
 			{Name: "gpt-4.1", ModifiedAt: time.Now().Format(time.RFC3339), Size: 0},
+			{Name: "llama-3.3-70b-versatile", ModifiedAt: time.Now().Format(time.RFC3339), Size: 0},
 		},
 	}
 	json.NewEncoder(w).Encode(models)
 }
-
-
 
 // HandleGenerate is legacy and currently unused.
 type ChatMessage struct {
@@ -85,9 +84,8 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-
-
-// HandleShow has not been used yet either.
+// HandleShow gives a generice openai response for all models.
+// Maybe we should use gemini for gemini models.
 type ShowResponse struct {
 	Model   string      `json:"model"`
 	Details ModelDetail `json:"details"`
@@ -97,6 +95,7 @@ type ModelDetail struct {
 	Family     string `json:"family"`
 	ModifiedAt string `json:"modified_at"`
 }
+
 func handleShow(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request: %v", r)
 	model := r.URL.Query().Get("name")
@@ -135,3 +134,48 @@ func handleNotFound(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// OpenAI v1/completions-style legacy
+type OpenAICompletionRequest struct {
+	Prompt      string  `json:"prompt"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+}
+
+type OpenAICompletionResponse struct {
+	ID      string                   `json:"id"`
+	Object  string                   `json:"object"`
+	Created int64                    `json:"created"`
+	Model   string                   `json:"model"`
+	Choices []OpenAICompletionChoice `json:"choices"`
+	Usage   OpenAICompletionUsage    `json:"usage"`
+}
+
+type OpenAICompletionChoice struct {
+	Text         string      `json:"text"`
+	Index        int         `json:"index"`
+	Logprobs     interface{} `json:"logprobs"` // Always null in completions
+	FinishReason string      `json:"finish_reason"`
+}
+
+type OpenAICompletionUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+func handleOpenAICompletions(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received V1/Completion request: %v", r.Body)
+
+	var completionReq OpenAICompletionRequest
+	if err := json.NewDecoder(r.Body).Decode(&completionReq); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	geminiReq := OpenAICompletionsToGemini(completionReq)
+	geminiResp, err := makeRequestToGemini(w, geminiReq)
+	if err != nil {
+		return
+	}
+	sendGeminiToOpenAICompletion(w, geminiResp)
+}
