@@ -153,6 +153,7 @@ services:
     environment:
       - POSTGRES_PASSWORD=${DOCKER_PASSWORD:-none}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     <<: *common # Inherit common configurations
     networks:

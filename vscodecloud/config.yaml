@@ -4,7 +4,7 @@ version: 0.0.1
 schema: v1
 
 models:
-  - name: My Model
+  - name: Gemini
     provider: openai
     apiBase: http://ollama:11434/v1
     model: gemini-2.0-flash
@@ -16,7 +16,7 @@ models:
       - edit
       - apply
 
-  - name: GPT-4o
+  - name: GPT
     provider: openai
     apiBase: http://ollama:11434/v1
     model: gpt-4o
@@ -28,5 +28,16 @@ models:
       temperature: 0.7
       maxTokens: 1500
 
+  - name: Groq
+    provider: openai
+    apiBase: http://ollama:11434/v1
+    model: llama-3.3-70b-versatile
+    roles:
+      - chat
+      - edit
+      - apply
 
-
+  - name: Ollama
+    provider: ollama
+    apiBase: http://ollama:11434/v1
+    model: ollama # Change the ollama server to insert model name.
