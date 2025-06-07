@@ -1,0 +1,21 @@
+# Fetch the environment project from github.
+alias fetch='git clone https://github.com/doughznutz/d8z-cloud-env projects/env'
+
+# Build the base container, it doubles as env:base in docker-compose
+alias start='docker build base -t d8z-cloud-container'
+
+# Help command.
+alias help='docker run -it --rm --env-file .env d8z-cloud-container help'
+
+# Build up the rest to get to "make"
+alias bash='docker run -it --rm --env-file .env -v .:/build d8z-cloud-container bash'
+alias  run='docker run -it --rm --env-file .env -v .:/build -v /var/run/docker.sock:/var/run/docker.sock  d8z-cloud-container'
+alias make='run make -C /build'
+
+# Bring up the VNC environement.
+alias vnc='make up-base'
+
+# vscode & server have too much stuff for 10G machine
+alias vscode='make up-vscode'
+alias code-server='make up-vscodecloud'
+

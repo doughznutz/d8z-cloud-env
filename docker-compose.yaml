@@ -12,7 +12,7 @@ x-common: &common
 #    - RESOLUTION=1920x1080             # Desktop monitor
 #    - RESOLUTION=1500x800               # Laptop monitor
   volumes:
-    - .:/home/${USER}/projects/env # Mount ourselves to fix ourselves.
+    - /home/${USER}/env:/home/${USER}/projects/env # Mount ourselves to fix ourselves.
     - /var/run/docker.sock:/var/run/docker.sock # Share Docker socket dind
   shm_size: "2g"
 
@@ -30,31 +30,6 @@ services:
     networks:
       - internal_net
 
-  # Bazel container
-  bazel:
-    image: env:bazel
-    container_name: bazel
-    build:
-      context: ./bazel
-    <<: *common # Inherit common configurations
-    networks:
-      - internal_net
-
-  # Dashboard
-  dashboard:
-    image: env:dashboard
-    container_name: dashboard
-    build:
-      context: ./dashboard
-    ports:
-      - "80:80"     # http://localhost
-    <<: *common # Inherit common configurations
-    networks:
-      internal_net:
-      #  aliases:
-      #    - api.openai.com
-      external_net: {}
-
   # Docker-in-Docker container
   docker:
     image: env:docker
@@ -66,20 +41,6 @@ services:
     <<: *common # Inherit common configurations
     networks:
       - internal_net
-
-  # A Docker Log watcher.
-  dozzle:
-    image: amir20/dozzle
-    container_name: dozzle
-    ports:
-      - "8083:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    #restart: unless-stopped
-    networks:
-      - internal_net
-      - external_net
-
 
   # Github container
   github:
@@ -97,12 +58,40 @@ services:
     networks:
       - external_net
 
-  # Voideditor container - VNC enabled editor
+# Development environment containers.
+
+  # Dashboard is the front-end server at http://localhost or http://cloudhost
+  dashboard:
+    image: env:dashboard
+    container_name: dashboard
+    build:
+      context: ./dev/dashboard
+    ports:
+      - "80:80"     # http://localhost
+    <<: *common # Inherit common configurations
+    networks:
+      internal_net:
+      external_net: {}
+
+  # A Docker Log watcher.
+  dozzle:
+    image: amir20/dozzle
+    container_name: dozzle
+    ports:
+      - "8083:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    #restart: unless-stopped
+    networks:
+      - internal_net
+      - external_net
+
+# Voideditor container - VNC enabled editor
   voideditor:
     image: env:voideditor
     container_name: voideditor
     build:
-      context: ./voideditor
+      context: ./dev/voideditor
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD:-none}
@@ -111,12 +100,26 @@ services:
       - internal_net
       - external_net
 
-  # VSCode container - VNC
+# VNC editor - currently just emacs.
+  vnc:
+    image: env:vnc
+    container_name: vnc
+    build:
+      context: ./dev/vnc
+      args:
+        USERNAME: ${USER}
+        PASSWORD: ${DOCKER_PASSWORD:-none}
+    <<: *common # Inherit common configurations
+    networks:
+      - internal_net
+      - external_net
+
+# VSCode container - VNC
   vscode:
     image: env:vscode
     container_name: vscode
     build:
-      context: ./vscode
+      context: ./dev/vscode
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD}
@@ -128,12 +131,12 @@ services:
       - external_net  # The code-server has issues with the proxy
 
 
-# VSCode-server container - VNC
-  vscodecloud:
-    image: env:vscodecloud
-    container_name: vscodecloud
+# VS Code-server container
+  codeserver:
+    image: env:codeserver
+    container_name: codeserver
     build:
-      context: ./vscodecloud
+      context: ./dev/codeserver
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD}
@@ -144,12 +147,12 @@ services:
       - internal_net
       - external_net  # The code-server has issues with the proxy
 
-  # Ollama service - No VNC, so pass in the keys here.
+# Ollama AI gateway service - No VNC, so pass in the keys here.
   ollama:
     image: env:ollama
     container_name: ollama
     build:
-      context: ./ollama
+      context: ./dev/ollama
     environment:
       - POSTGRES_PASSWORD=${DOCKER_PASSWORD:-none}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -158,8 +161,6 @@ services:
     <<: *common # Inherit common configurations
     networks:
       internal_net:
-        aliases:
-          - 127.0.0.1
       external_net: {}
 
 
@@ -177,7 +178,7 @@ services:
     image: env:postgres
     container_name: postgres
     build: 
-      context: ./postgres
+      context: ./dev/postgres
     environment:
       POSTGRES_USER: ${USER}
       POSTGRES_PASSWORD: ${DOCKER_PASSWORD:-none}
@@ -185,7 +186,7 @@ services:
     #ports:
     #  - "5432:5432"
     volumes:
-      - ${HOME}/AIjournal:/var/lib/postgresql/data
+      - /home/doughznutz/AIjournal:/var/lib/postgresql/data
     networks:
       - internal_net
 
