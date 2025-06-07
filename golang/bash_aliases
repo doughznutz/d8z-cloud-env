@@ -1,7 +1,0 @@
-#
-# FILE ~/tools/docker/golang/bash_aliases
-
-# Golang aliases
-alias blaze='bazel'
-alias daze='bazel'
-

@@ -1,19 +1,20 @@
 # FROM dorowu/ubuntu-desktop-lxde-vnc:focal
-FROM env:base
+FROM ubuntu:latest
 
 # Install essential packages
 RUN apt-get update && apt-get install -y \
-    curl wget gnupg2 software-properties-common build-essential
+    curl wget 
+    # gnupg2 software-properties-common build-essential
 
-RUN apt-get update && apt-get install -y \
-    git unzip tar python3 python3-pip ca-certificates
+#RUN apt-get update && apt-get install -y \
+#    git unzip tar python3 python3-pip ca-certificates
 
-RUN apt-get update && apt-get install -y \
-    gnome-keyring apt-transport-https software-properties-common
+#RUN apt-get update && apt-get install -y \
+#    gnome-keyring apt-transport-https software-properties-common
 
 # Install Node.js (LTS) and Vite
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && npm install -g vite
+# RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+#    apt-get install -y nodejs && npm install -g vite
 
 # Install Go
 ENV GO_VERSION=1.22.3

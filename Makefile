@@ -27,20 +27,25 @@ SERVICES += adminer postgres
 adminer_RUN_DEPS := dashboard postgres
 
 # Editors: VoidEditor (AI:integrated) and VSCode (AI:Continue) and VS code-Server (AI:Continue)  TODO: could combine these 2.
+# Vscode-server (web) using Continue plug-in Agent.
+SERVICES += codeserver
+codeserver_BUILD_DEPS :=
+codeserver_RUN_DEPS := dashboard ollama
+
+# Open Sourced version of vscode with baked-in "void" Agent.
+SERVICES += vnc
+vnc_BUILD_DEPS := 
+vnc_RUN_DEPS := dashboard ollama
+
 # Open Sourced version of vscode with baked-in "void" Agent.
 SERVICES += voideditor
-voideditor_BUILD_DEPS := base
+voideditor_BUILD_DEPS := 
 voideditor_RUN_DEPS := dashboard ollama
 
 # Both vscode (vnc) and code-server (web) using Continue plug-in Agent.
 SERVICES += vscode
-vscode_BUILD_DEPS := base
+vscode_BUILD_DEPS := 
 vscode_RUN_DEPS := dashboard ollama
-
-# Vscode-server (web) using Continue plug-in Agent.
-SERVICES += vscodecloud
-vscodecloud_BUILD_DEPS :=
-vscodecloud_RUN_DEPS := dashboard ollama
 
 include docker/docker.mk
 

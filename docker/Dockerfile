@@ -6,6 +6,8 @@ FROM ubuntu:latest
 # Install Docker tools
 RUN apt-get update && apt-get install -y \
     docker.io \
+    make \
+    emacs \
     && apt-get clean
 
 
