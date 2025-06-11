@@ -1,6 +1,0 @@
-#
-# FILE: ~/env/docker/bash_aliases
-
-# Docker aliases
-alias dc='docker-compose'
-alias dcr='dc down --volumes && docker-compose build && docker-compose up -d'

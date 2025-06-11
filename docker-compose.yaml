@@ -22,9 +22,6 @@ services:
     container_name: base
     build:
       context: ./base
-      args:
-        USERNAME: ${USER}
-        PASSWORD: ${DOCKER_PASSWORD:-none}
     <<: *common # Inherit common configurations
     networks:
       - external_net
@@ -35,8 +32,6 @@ services:
     container_name: docker
     build:
       context: ./docker
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # Share Docker socket
     <<: *common # Inherit common configurations
     networks:
       - external_net
@@ -186,7 +181,6 @@ services:
       - /home/doughznutz/AIjournal:/var/lib/postgresql/data
     networks:
       - internal_net
-
 
 networks:
   internal_net:

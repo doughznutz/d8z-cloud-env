@@ -2,30 +2,20 @@
 FROM ubuntu:latest
 
 # Install necessary dependencies
-RUN apt-get update && \
-    apt-get install -y \
-    	bash \
-	curl \
-	dos2unix \
-	emacs \
-	git \
-	jq \
-	openssh-client \
-	coreutils
+RUN apt-get update \
+    && apt-get install -y dos2unix \
+	&& apt-get clean
 
-RUN apt-get install -y \
-    apt-transport-https \
-    ca-certificates \
-    gnupg \
-    lsb-release
-
-
+RUN apt-get update \
+	&& apt-get install -y curl git jq \
+	&& apt-get clean
 
 # Clean up unnecessary packages
 RUN apt-get autoremove -y && apt-get clean
 RUN rm -rf /var/lib/apt/lists/*
 
 # Copy the source code from the project directory.
+# This is how entrypoint "finds" the code.
 COPY ./ /src
 RUN rm -rf /src/.env
 

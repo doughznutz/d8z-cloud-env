@@ -1,5 +1,0 @@
-#
-# FILE: ~/docker/env/github/bash_aliases
-
-# Docker aliases
-alias github_auth='echo $GITHUB_TOKEN | gh auth login --with-token'
