@@ -54,10 +54,9 @@ func main() {
 	r.Handle("/", http.FileServer(http.Dir("./static")))
 
 	// Redirect VNC traffic through to the respective servers. 80->80
-	r.Handle("/base/*", ReverseProxy("http://base", "/base"))
+	r.Handle("/vnc/*", ReverseProxy("http://vnc", "/vnc"))
 	r.Handle("/voideditor/*", ReverseProxy("http://voideditor", "/voideditor"))
 	r.Handle("/vscode/*", ReverseProxy("http://vscode", "/vscode"))
-
 
 
 	// Things that need a port change or https dont work here.

@@ -1,5 +1,6 @@
 # FROM dorowu/ubuntu-desktop-lxde-vnc:focal
-FROM env:base
+# FROM env:base
+FROM dev:vnc
 
 # Install essential packages
 RUN apt-get update && apt-get install -y \
