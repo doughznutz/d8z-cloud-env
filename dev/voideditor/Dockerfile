@@ -40,7 +40,9 @@ RUN npm run gulp vscode-linux-x64
 
 # Switch to a VNC based docker image.
 #FROM dorowu/ubuntu-desktop-lxde-vnc
-FROM env:base
+#FROM env:base
+FROM dev:vnc
+
 COPY --from=builder /VSCode-linux-x64 /usr/bin/voideditor
 ENV PATH=/usr/bin/voideditor/bin:$PATH
 

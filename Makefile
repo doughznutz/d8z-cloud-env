@@ -1,50 +1,47 @@
-# Define services incrementally
-SERVICES += base
+# "base" environment container. 
+# docker and github containers will be for testing once merged into base.
+# These arent technically services, but are here for simplicity
+SERVICES += base docker github
 base_BUILD_DEPS :=
-base_RUN_DEPS := dashboard
+base_RUN_DEPS :=
 
-# Docker containers. Dozzle is a log viewer
-SERVICES += docker dozzle
-docker_BUILD_DEPS :=
+# Development Environment Containers
+# Dashboard is Our entry point into the system.
+SERVICES += dashboard
+dashboard_BUILD_DEPS :=
+dashboard_RUN_DEPS :=
+
+SERVICES += dozzle
+dozzle_BUILD_DEPS :=
 dozzle_RUN_DEPS := dashboard
-
-SERVICES += github
-github_BUILD_DEPS :=
-github_RUN_DEPS :=
 
 # Ollama (openai-API) gateway to all them LLMS, along with a database to store the request/response pairs.
 SERVICES += ollama
 ollama_BUILD_DEPS :=
 ollama_RUN_DEPS := postgres
 
-# Our entry point into the system.
-SERVICES += dashboard
-dashboard_BUILD_DEPS :=
-dashboard_RUN_DEPS :=
-
 # Database containers
 SERVICES += adminer postgres
 adminer_RUN_DEPS := dashboard postgres
 
-# Editors: VoidEditor (AI:integrated) and VSCode (AI:Continue) and VS code-Server (AI:Continue)  TODO: could combine these 2.
-# Vscode-server (web) using Continue plug-in Agent.
-SERVICES += codeserver
-codeserver_BUILD_DEPS :=
-codeserver_RUN_DEPS := dashboard ollama
-
-# Open Sourced version of vscode with baked-in "void" Agent.
+# This VNC container has emacs, defines the USER/PASSWORD and is used as a base image for the other editors.
 SERVICES += vnc
 vnc_BUILD_DEPS := 
 vnc_RUN_DEPS := dashboard ollama
 
+# VS codeserver (web) using Continue plug-in Agent.
+SERVICES += codeserver
+codeserver_BUILD_DEPS := vnc
+codeserver_RUN_DEPS := dashboard ollama
+
 # Open Sourced version of vscode with baked-in "void" Agent.
 SERVICES += voideditor
-voideditor_BUILD_DEPS := 
+voideditor_BUILD_DEPS := vnc
 voideditor_RUN_DEPS := dashboard ollama
 
 # Both vscode (vnc) and code-server (web) using Continue plug-in Agent.
 SERVICES += vscode
-vscode_BUILD_DEPS := 
+vscode_BUILD_DEPS := vnc
 vscode_RUN_DEPS := dashboard ollama
 
 include docker/docker.mk
@@ -52,7 +49,7 @@ include docker/docker.mk
 
 # Move these into github/github.mk and pick your targets better.
 .PHONY: branch
-branch:
+branch: build-github
 	docker compose run --build github create_branch clean
 
 .PHONY: pull_request

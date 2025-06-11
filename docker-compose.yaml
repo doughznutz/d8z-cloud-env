@@ -2,24 +2,23 @@
 x-common: &common
   environment:
     - USER=${USER}
-    # Use environment variable or default
-    - VNC_PASSWORD=${DOCKER_PASSWORD:-none}
     - PASSWORD=${DOCKER_PASSWORD:-none} 
+    - VNC_PASSWORD=${DOCKER_PASSWORD:-none}
     - CODE_SERVER_PASSWORD=${DOCKER_PASSWORD:-none}
-    - PROJECT=env
+    - PROJECT=d8z-cloud-env
     - DISPLAY=:1
     - RESOLUTION=2500x1500             # Desktop monitor
 #    - RESOLUTION=1920x1080             # Desktop monitor
 #    - RESOLUTION=1500x800               # Laptop monitor
   volumes:
-    - /home/${USER}/env:/home/${USER}/projects/env # Mount ourselves to fix ourselves.
+    - /home/${USER}/projects/d8z-cloud-env:/home/${USER}/projects/d8z-cloud-env # Mount ourselves to fix ourselves.
     - /var/run/docker.sock:/var/run/docker.sock # Share Docker socket dind
   shm_size: "2g"
 
 services:
   # Base container - builds the base image
   base:
-    image: ${PROJECT:-env}:base
+    image: env:base
     container_name: base
     build:
       context: ./base
@@ -28,7 +27,7 @@ services:
         PASSWORD: ${DOCKER_PASSWORD:-none}
     <<: *common # Inherit common configurations
     networks:
-      - internal_net
+      - external_net
 
   # Docker-in-Docker container
   docker:
@@ -40,7 +39,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock # Share Docker socket
     <<: *common # Inherit common configurations
     networks:
-      - internal_net
+      - external_net
 
   # Github container
   github:
@@ -62,7 +61,7 @@ services:
 
   # Dashboard is the front-end server at http://localhost or http://cloudhost
   dashboard:
-    image: env:dashboard
+    image: dev:dashboard
     container_name: dashboard
     build:
       context: ./dev/dashboard
@@ -81,14 +80,13 @@ services:
       - "8083:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    #restart: unless-stopped
     networks:
       - internal_net
       - external_net
 
 # Voideditor container - VNC enabled editor
   voideditor:
-    image: env:voideditor
+    image: dev:voideditor
     container_name: voideditor
     build:
       context: ./dev/voideditor
@@ -102,7 +100,7 @@ services:
 
 # VNC editor - currently just emacs.
   vnc:
-    image: env:vnc
+    image: dev:vnc
     container_name: vnc
     build:
       context: ./dev/vnc
@@ -116,7 +114,7 @@ services:
 
 # VSCode container - VNC
   vscode:
-    image: env:vscode
+    image: dev:vscode
     container_name: vscode
     build:
       context: ./dev/vscode
@@ -133,7 +131,7 @@ services:
 
 # VS Code-server container
   codeserver:
-    image: env:codeserver
+    image: dev:codeserver
     container_name: codeserver
     build:
       context: ./dev/codeserver
@@ -149,7 +147,7 @@ services:
 
 # Ollama AI gateway service - No VNC, so pass in the keys here.
   ollama:
-    image: env:ollama
+    image: dev:ollama
     container_name: ollama
     build:
       context: ./dev/ollama
@@ -167,7 +165,6 @@ services:
 # Database and DB admin.
   adminer:
     image: adminer
-    # restart: always
     ports:
       - 8082:8080
     networks:
@@ -175,7 +172,7 @@ services:
       - external_net
 
   postgres:
-    image: env:postgres
+    image: dev:postgres
     container_name: postgres
     build: 
       context: ./dev/postgres

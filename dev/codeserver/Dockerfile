@@ -1,10 +1,11 @@
 # FROM dorowu/ubuntu-desktop-lxde-vnc:focal
-FROM ubuntu:latest
+# FROM ubuntu:latest
+FROM env:vnc
 
 # Install essential packages
 RUN apt-get update && apt-get install -y \
-    curl wget 
-    # gnupg2 software-properties-common build-essential
+    curl wget gnupg2
+    # software-properties-common build-essential
 
 #RUN apt-get update && apt-get install -y \
 #    git unzip tar python3 python3-pip ca-certificates
