@@ -24,6 +24,8 @@ func main() {
 	//mux.HandleFunc("/api/generate", handleGenerate)
 	mux.HandleFunc("/api/tags", handleTags)
 	mux.HandleFunc("/api/show", handleShow)
+	mux.HandleFunc("/v1/api/show", handleShow)
+
 	//mux.HandleFunc("/api/delete", handleMockSuccess)
 	//mux.HandleFunc("/api/pull", handleMockSuccess)
 

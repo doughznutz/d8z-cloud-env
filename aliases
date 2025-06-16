@@ -1,16 +1,17 @@
 # Fetch the environment project from github.
-alias fetch='git clone https://github.com/doughznutz/d8z-cloud-env projects/env'
+alias fetch='git clone https://github.com/doughznutz/d8z-cloud-env projects/d8z-cloud-env'
 
 # Build the base container, it doubles as env:base in docker-compose
-alias start='docker build base -t d8z-cloud-container'
+alias start='/usr/bin/docker build base -t d8z-cloud-container'
 
 # Help command.
-alias help='docker run -it --rm --env-file .env d8z-cloud-container help'
+alias help='/usr/bin/docker run -it --rm --env-file .env d8z-cloud-container help'
 
 # Build up the rest to get to "make"
-alias bash='docker run -it --rm --env-file .env -v .:/build d8z-cloud-container bash'
-alias  run='docker run -it --rm --env-file .env -v .:/build -v /var/run/docker.sock:/var/run/docker.sock  d8z-cloud-container'
-alias make='run make -C /build'
+alias docker-run='/usr/bin/docker run -it --rm --env-file .env -v .:/build -v /var/run/docker.sock:/var/run/docker.sock  d8z-cloud-container'
+alias bash='docker-run bash'
+alias docker='docker-run docker'
+alias make='docker-run make -C /build'
 
 # Bring up the VNC environement.
 alias vnc='make up-base'
