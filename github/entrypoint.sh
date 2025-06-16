@@ -27,15 +27,23 @@ check_repo() {
 create_repo() {
     echo "Creating repository: $GITHUB_REPO"
 
+    CREATE_URL="$GITHUB_API/orgs/$GITHUB_ORG/repos"
     if [ "$GITHUB_ORG" == "$GITHUB_USER" ]; then
         CREATE_URL="$GITHUB_API/user/repos"
-    else
-        CREATE_URL="$GITHUB_API/orgs/$GITHUB_ORG/repos"
     fi
 
-    RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "Accept: application/vnd.github+json" -X POST \
-        "$CREATE_URL" \
-        -d "{\"name\": \"$GITHUB_REPO\", \"private\": false}")
+    PRIVATE_REPO=true
+    if [ "$1" == "public" ]; then
+	    echo "Creating public repo."
+        PRIVATE_REPO=false
+    fi	
+
+    RESPONSE=$(curl -s \
+        -H "$AUTH_HEADER" \
+        -H "Accept: application/vnd.github+json" \
+        -X POST "$CREATE_URL" \
+        -d "{\"name\": \"$GITHUB_REPO\", \"private\": \"$PRIVATE_REPO\"}" \
+        )
 
     REPO_URL=$(echo "$RESPONSE" | jq -r '.html_url')
 
@@ -165,7 +173,7 @@ case "$1" in
         check_repo
         ;;
     create_repo)
-        create_repo
+        create_repo "$2"
         ;;
     diff_repo)
         diff_repo

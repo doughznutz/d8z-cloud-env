@@ -31,10 +31,7 @@ RUN NODE_OPTIONS="--max-old-space-size=8192" npm run buildreact
 # RUN npm run watch
 RUN npm run gulp vscode-linux-x64
 
-# Copy in the hacks and rebuild
-#COPY void.contribution.ts ./src/vs/workbench/contrib/void/browser/void.contribution.ts
-#COPY voidApiKeyInjector.contribution.ts ./src/vs/workbench/contrib/void/browser/voidApiKeyInjector.contribution.ts
-#COPY voidSettingsService.ts ./src/vs/workbench/contrib/void/common/voidSettingsService.ts
+# Copy in hacks and rebuild
 #COPY modelCapabilities.ts ./src/vs/workbench/contrib/void/common/modelCapabilities.ts
 #RUN npm run gulp vscode-linux-x64
 
@@ -49,16 +46,15 @@ ENV PATH=/usr/bin/voideditor/bin:$PATH
 # Tell voideditor to not worry about WSL.
 ENV DONT_PROMPT_WSL_INSTALL=IS_THIS_NECESSARY
 
-# Expose the port (if applicable; adjust as needed)
-EXPOSE 6800
+# Expose the noVNC port
 EXPOSE 80
 
-# Clone the VoidEditor repository
-ARG USERNAME
-USER $USERNAME
+# Clone the VoidEditor repository if you want to work on voideditor code.
+#ARG USERNAME
+#USER $USERNAME
 #RUN git clone https://github.com/voideditor/void.git /home/$USERNAME/projects/voideditor
+#USER root
 
 # Set the default command to start VoidEditor
-USER root
 #COPY *.conf /etc/supervisor/conf.d/
 #CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

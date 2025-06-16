@@ -37,7 +37,7 @@ models:
       - edit
       - apply
 
-  - name: Ollama
-    provider: ollama
-    apiBase: http://ollama:11434/v1
-    model: ollama # Change the ollama server to insert model name.
+#  - name: Ollama
+#    provider: ollama
+#    apiBase: http://ollama:11434/v1
+#    model: ollama # Change the ollama server to insert model name.
