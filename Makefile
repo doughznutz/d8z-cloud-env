@@ -1,7 +1,7 @@
 # "base" environment container. 
 # docker and github containers will be for testing once merged into base.
 # These arent technically services, but are here for simplicity
-SERVICES += base docker github
+SERVICES += base docker
 base_BUILD_DEPS :=
 base_RUN_DEPS :=
 
@@ -44,14 +44,6 @@ SERVICES += vscode
 vscode_BUILD_DEPS := vnc
 vscode_RUN_DEPS := dashboard ollama
 
+# Unfortunately order matters here.
+include github/github.mk
 include docker/docker.mk
-
-
-# Move these into github/github.mk and pick your targets better.
-.PHONY: branch
-branch: build-github
-	docker compose run --build github create_branch clean
-
-.PHONY: pull_request
-pull_request:
-	docker compose run github create_pull_request $(BRANCH)

@@ -1,19 +1,7 @@
-# Define the common configuration
-x-common: &common
-  environment:
-    - USER=${USER}
-    - PASSWORD=${DOCKER_PASSWORD:-none} 
-    - VNC_PASSWORD=${DOCKER_PASSWORD:-none}
-    - CODE_SERVER_PASSWORD=${DOCKER_PASSWORD:-none}
-    - PROJECT=d8z-cloud-env
-    - DISPLAY=:1
-    - RESOLUTION=2500x1500             # Desktop monitor
-#    - RESOLUTION=1920x1080             # Desktop monitor
-#    - RESOLUTION=1500x800               # Laptop monitor
-  volumes:
-    - /home/${USER}/projects/d8z-cloud-env:/home/${USER}/projects/d8z-cloud-env # Mount ourselves to fix ourselves.
-    - /var/run/docker.sock:/var/run/docker.sock # Share Docker socket dind
-  shm_size: "2g"
+# The d8z-cloud-environment is a set of Docker containers to get you up and running 
+# in the cloud quickly.  It utilizes simple containers that can run in a container optimized
+# OS.  Included is a sample development environment with VNC, VScode and VoidEditor with
+# AI Agents enabled via API_KEYS routed through a local ollama proxy server.
 
 services:
   # Base container - builds the base image
@@ -22,7 +10,10 @@ services:
     container_name: base
     build:
       context: ./base
-    <<: *common # Inherit common configurations
+    env_file: ./.env
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
     networks:
       - external_net
 
@@ -32,12 +23,9 @@ services:
     container_name: cloud
     build:
       context: ./cloud
-    environment:
-      - GITHUB_TOKEN=${GIT_D8Z_TOKEN:-none}
-      - GITHUB_USER=${USER}
-      - GITHUB_ORG=${USER}
-      - GITHUB_REPO=d8z-cloud-env
-    <<: *common # Inherit common configurations
+    env_file: ./.env
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
     networks:
       - external_net
 
@@ -47,7 +35,9 @@ services:
     container_name: docker
     build:
       context: ./docker
-    <<: *common # Inherit common configurations
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
     networks:
       - external_net
 
@@ -58,17 +48,13 @@ services:
     build:
       context: .  # We check in the entire environment, so need visibility to .
       dockerfile: ./github/Dockerfile
-    environment:
-      - GITHUB_TOKEN=${GIT_D8Z_TOKEN:-none}
-      - GITHUB_USER=${USER}
-      - GITHUB_ORG=${USER}
-      - GITHUB_REPO=d8z-cloud-env
-    <<: *common # Inherit common configurations
+    env_file: ./.env
+    #volumes:
+    #  - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
     networks:
       - external_net
 
 # Development environment containers.
-
   # Dashboard is the front-end server at http://localhost or http://cloudhost
   dashboard:
     image: dev:dashboard
@@ -77,7 +63,6 @@ services:
       context: ./dev/dashboard
     ports:
       - "80:80"     # http://localhost
-    <<: *common # Inherit common configurations
     networks:
       internal_net:
       external_net: {}
@@ -94,7 +79,7 @@ services:
       - internal_net
       - external_net
 
-# Voideditor container - VNC enabled editor
+# Voideditor container - VNC enabled editor with built in AI Agent
   voideditor:
     image: dev:voideditor
     container_name: voideditor
@@ -103,13 +88,16 @@ services:
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD:-none}
-    <<: *common # Inherit common configurations
+    env_file: ./.env
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
     privileged: true
+    shm_size: "2g"
     networks:
-      - internal_net
-    #  - external_net
+      - internal_net  # Access via dashboard
 
-# VNC editor - currently just emacs.
+# VNC editor - currently just emacs (no AI agent yet)
   vnc:
     image: dev:vnc
     container_name: vnc
@@ -118,12 +106,14 @@ services:
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD:-none}
-    <<: *common # Inherit common configurations
+    env_file: ./.env
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
     networks:
-      - internal_net
-    #  - external_net
+      - internal_net  # Go through the dasboard.
 
-# VSCode container - VNC
+# VSCode container - VNC enabled editor with Continue AI Agent
   vscode:
     image: dev:vscode
     container_name: vscode
@@ -132,16 +122,16 @@ services:
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD}
-    #ports:
-    #  - 8080:8080  # Access: http://localhost:8080
-    <<: *common
+    env_file: ./.env
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
     privileged: true
     networks:
-      - internal_net
-    #  - external_net  # The code-server has issues with the proxy
+      - internal_net   # Go through the dasboard
 
 
-# VS Code-server container
+# VS Code-server - Web based editor with Continue AI Agent
   codeserver:
     image: dev:codeserver
     container_name: codeserver
@@ -153,11 +143,14 @@ services:
     ports:
     #  - 8081:8080  # Access: http://localhost:8080
       - 443:8080  # Use this port in the cloud for now.
-    <<: *common
+    env_file: ./.env
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
     privileged: true
     networks:
       - internal_net
-      - external_net  # The code-server has issues with the proxy
+      - external_net  # The code-server has issues with the dashboard redirect.
 
 # Ollama AI gateway service - No VNC, so pass in the keys here.
   ollama:
@@ -165,12 +158,9 @@ services:
     container_name: ollama
     build:
       context: ./dev/ollama
-    environment:
-      - POSTGRES_PASSWORD=${DOCKER_PASSWORD:-none}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    <<: *common # Inherit common configurations
+    env_file: ./.keys
+      #  - ./.env
+      #  - ./.keys
     networks:
       internal_net:
       external_net: {}
@@ -190,12 +180,7 @@ services:
     container_name: postgres
     build: 
       context: ./dev/postgres
-    environment:
-      POSTGRES_USER: ${USER}
-      POSTGRES_PASSWORD: ${DOCKER_PASSWORD:-none}
-      POSTGRES_DB: openai_logs
-    #ports:
-    #  - "5432:5432"
+    env_file: ./.env
     volumes:
       - /home/doughznutz/AIjournal:/var/lib/postgresql/data
     networks:
