@@ -28,7 +28,7 @@ RUN gcloud config set-project $CLOUD_PROJECT_ID  && \
 WORKDIR /app
 
 # Copy any application code into the container (optional)
-# COPY . /app
+COPY . /app
 
 # Entrypoint - you can customize this to run a specific script
-# ENTRYPOINT ["/bin/bash"]
+ENTRYPOINT ["/app/entrypoint.sh"]

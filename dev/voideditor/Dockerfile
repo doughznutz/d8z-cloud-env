@@ -36,8 +36,6 @@ RUN npm run gulp vscode-linux-x64
 #RUN npm run gulp vscode-linux-x64
 
 # Switch to a VNC based docker image.
-#FROM dorowu/ubuntu-desktop-lxde-vnc
-#FROM env:base
 FROM dev:vnc
 
 COPY --from=builder /VSCode-linux-x64 /usr/bin/voideditor
@@ -55,6 +53,11 @@ EXPOSE 80
 #RUN git clone https://github.com/voideditor/void.git /home/$USERNAME/projects/voideditor
 #USER root
 
+# Copy the Void Configuration in, as it defaults to yucky black.
+# May want the same in vscode container.
+WORKDIR /app 
+COPY ./Void_User_settings.json .
+
 # Set the default command to start VoidEditor
-#COPY *.conf /etc/supervisor/conf.d/
-#CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+COPY *.conf /etc/supervisor/conf.d/
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

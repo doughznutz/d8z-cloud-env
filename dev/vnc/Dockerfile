@@ -19,13 +19,20 @@ EXPOSE 5900 6080
 # Setup the VNC dimensions...override in docker-compose.yaml
 ENV RESOLUTION=1920x1080
 
-# This is to help track the Docker hierarchy, by copying the context to /docker/self
-RUN [ -d "/docker/self" ] && mv /docker/self /docker/self/parent || true
+# This Copy ourselves into the container at /docker/self
 COPY . /docker/self
 
-# Pickup our aliases so far... should this go into the user space?
-COPY ./bash_aliases bash_aliases
-RUN cat bash_aliases >> ~root/.bash_aliases && rm bash_aliases
+# Install Docker tools
+RUN apt-get update \
+    && apt-get install -y docker.io \
+    && apt-get clean
+
+# Install docker-compose
+RUN mkdir -p /usr/libexec/docker/cli-plugins
+ADD https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 \
+          /usr/libexec/docker/cli-plugins/docker-compose
+RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
 
 # Add a non-root User.
 ARG USERNAME
