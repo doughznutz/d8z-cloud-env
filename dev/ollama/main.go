@@ -19,6 +19,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", handleOpenAIChat)
+	mux.HandleFunc("/v1beta/models/gemini-1.5-flash:generateContent", handleGeminiChat)
 	//mux.HandleFunc("/v1/chat/completions", handleGroqChat)
 	//mux.HandleFunc("/v1/completions", handleOpenAICompletions)
 	//mux.HandleFunc("/api/generate", handleGenerate)

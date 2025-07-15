@@ -227,7 +227,7 @@ func streamGeminiToOpenAIChat(w http.ResponseWriter, resp *GeminiResponse) {
 			"id":      "chatcmpl-gemini",
 			"object":  "chat.completion.chunk",
 			"created": 0,
-			"model":   "gemini-2.0-flash", // chatReq.Model,
+			"model":   "gemini-1.5-flash", // chatReq.Model,
 			"choices": []map[string]interface{}{{
 				"delta": map[string]string{
 					"content": part.Text,
@@ -245,4 +245,44 @@ func streamGeminiToOpenAIChat(w http.ResponseWriter, resp *GeminiResponse) {
 	// Final DONE message
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received V1/Chat/Completion request: %v", r.Body)
+
+	var geminiReq GeminiRequest
+	if err := json.NewDecoder(r.Body).Decode(&geminiReq); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Start the database log entry
+	dbEntry := &OpenAILog{
+		Timestamp: time.Now(),
+		UserID:    "doughznutz", // Replace with reverse DNS of container requesting.
+		Model:     "gemini-1.5-flash",
+	}
+	var err error
+	dbEntry.Request, err = json.Marshal(geminiReq)
+	if err != nil {
+		log.Println("Error marshalling chatReq to JSON:", err)
+	}
+
+	geminiResp, err := makeRequestToGemini(w, geminiReq)
+	if err != nil {
+		return
+	}
+
+	// We need to convert this to openAIchat response.
+	dbEntry.Response, err = json.Marshal(geminiResp)
+	if err != nil {
+		log.Println("Error marshalling geminiReq to JSON:", err)
+	}
+
+	// This function shouldnt bother returning...just log the error inside it.
+	if err := insert_into_ollama_logs(dbEntry); err != nil {
+		log.Printf("Error inserting into database: %v", err)
+	}
+
+	json.NewEncoder(w).Encode(geminiResp)
 }

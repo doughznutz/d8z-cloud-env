@@ -18,11 +18,16 @@ dozzle_RUN_DEPS := dashboard
 # Ollama (openai-API) gateway to all them LLMS, along with a database to store the request/response pairs.
 SERVICES += ollama
 ollama_BUILD_DEPS :=
-ollama_RUN_DEPS := postgres
+ollama_RUN_DEPS := ollamadb
+
+SERVICES += litellm
+litellm_BUILD_DEPS :=
+litellm_RUN_DEPS := geminidb
+
 
 # Database containers
-SERVICES += adminer postgres
-adminer_RUN_DEPS := dashboard postgres
+SERVICES += adminer geminidb ollamadb 
+adminer_RUN_DEPS := dashboard geminidb ollamadb
 
 # This VNC container has emacs, defines the USER/PASSWORD and is used as a base image for the other editors.
 SERVICES += vnc

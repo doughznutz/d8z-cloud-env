@@ -1,4 +1,4 @@
-CREATE TABLE openai_logs (
+CREATE TABLE ollama_logs (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     user_id TEXT,
@@ -6,3 +6,5 @@ CREATE TABLE openai_logs (
     request JSONB,
     response JSONB
 );
+
+
