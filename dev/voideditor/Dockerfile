@@ -60,4 +60,4 @@ COPY ./Void_User_settings.json .
 
 # Set the default command to start VoidEditor
 COPY *.conf /etc/supervisor/conf.d/
-CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+#CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

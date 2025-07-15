@@ -33,6 +33,13 @@ ADD https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-l
           /usr/libexec/docker/cli-plugins/docker-compose
 RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
+# Install Node.js (using nodesource repository)
+RUN curl -sL https://deb.nodesource.com/setup_18.x | bash -
+RUN apt-get install -y nodejs
+
+# Install Gemini CLI globally
+RUN npm install -g @google/gemini-cli
+
 
 # Add a non-root User.
 ARG USERNAME

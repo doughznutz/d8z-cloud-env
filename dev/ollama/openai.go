@@ -89,7 +89,7 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// This function shouldnt bother returning...just log the error inside it.
-		if err := insert_into_openai_logs(dbEntry); err != nil {
+		if err := insert_into_ollama_logs(dbEntry); err != nil {
 			log.Printf("Error inserting into database: %v", err)
 		}
 		return
@@ -151,13 +151,13 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 
 	// Log the entire response
 	//dbEntry.Response = buf.Bytes()
-	dbEntry.Response, err = stream_into_openai_logs(buf)
+	dbEntry.Response, err = stream_into_ollama_logs(buf)
 	if err != nil {
 		log.Println("Error marshalling OpenAIChatResponse to JSON:", err)
 	}
 
 	// This function shouldnt bother returning...just log the error inside it.
-	if err := insert_into_openai_logs(dbEntry); err != nil {
+	if err := insert_into_ollama_logs(dbEntry); err != nil {
 		log.Printf("Error inserting into database: %v", err)
 	}
 }

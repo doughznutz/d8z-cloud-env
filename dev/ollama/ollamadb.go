@@ -45,7 +45,7 @@ func prettifyJSON(data []byte) ([]byte, error) {
 	return prettifiedData, nil
 }
 
-func stream_into_openai_logs(buf bytes.Buffer) ([]byte, error) {
+func stream_into_ollama_logs(buf bytes.Buffer) ([]byte, error) {
 	var openAIChatResponse OpenAIChatResponse
 	scanner := bufio.NewScanner(&buf)
 	for scanner.Scan() {
@@ -79,9 +79,9 @@ func stream_into_openai_logs(buf bytes.Buffer) ([]byte, error) {
 	return json.Marshal(openAIChatResponse)
 }
 
-func insert_into_openai_logs(dbEntry *OpenAILog) error {
+func insert_into_ollama_logs(dbEntry *OpenAILog) error {
 	// Connection details
-	host := "postgres"
+	host := "ollamadb"
 	port := 5432
 	user := "doughznutz"
 	password := os.Getenv("POSTGRES_PASSWORD")
@@ -103,7 +103,7 @@ func insert_into_openai_logs(dbEntry *OpenAILog) error {
 	)
 
 	// Connect
-	db, err := sql.Open("postgres", psqlInfo)
+	db, err := sql.Open("ollamadb", psqlInfo)
 	if err != nil {
 		return err
 	}
