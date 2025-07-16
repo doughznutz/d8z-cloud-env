@@ -34,7 +34,7 @@ ADD https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-l
 RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # Install Node.js (using nodesource repository)
-RUN curl -sL https://deb.nodesource.com/setup_18.x | bash -
+RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
 RUN apt-get install -y nodejs
 
 # Install Gemini CLI globally

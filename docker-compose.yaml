@@ -24,8 +24,11 @@ services:
     build:
       context: ./cloud
     env_file: ./.env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/creds.json
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+    # - ${GOOGLE_APPLICATION_CREDENTIALS_PATH}:/app/creds.json:ro
     networks:
       - external_net
 
@@ -194,6 +197,8 @@ services:
     container_name: gemini
     build:
       context: ./dev/gemini
+      args:
+        USERNAME: ${USER}
     #environment:
     #  - GEMINI_API_KEY=NO_KEYS_ALLOWED
     #  - GEMINI_BASE_URL=http://litellm:4000

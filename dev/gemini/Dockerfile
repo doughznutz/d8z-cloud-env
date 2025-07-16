@@ -22,6 +22,16 @@ RUN npm run build
 # Install globally so we can run in the project dir.
 RUN npm install -g .
 
+# Create a non-root user
+ARG USERNAME
+RUN groupadd $USERNAME && useradd -ms /bin/bash -g $USERNAME $USERNAME
+
+# Change ownership of the working directory
+# RUN chown -R $USERNAME:$USERNAME /gemini-cli
+
+# Switch to the non-root user
+# USER $USERNAME
+
 # Run gemini.
 # CMD ["npm", "start"]
 CMD ["bash", "-c", "cd /home/$USER/projects/$PROJECT && gemini"]
