@@ -1,7 +1,7 @@
 # "base" environment container. 
 # docker and github containers will be for testing once merged into base.
 # These arent technically services, but are here for simplicity
-SERVICES += base docker
+SERVICES += base docker cloud
 base_BUILD_DEPS :=
 base_RUN_DEPS :=
 
