@@ -17,6 +17,14 @@ diff: build-github
 branch: build-github
 	docker compose run github create_branch clean
 
+.PHONY: rebase
+rebase: build-github
+	docker compose run github rebase_repo
+
+.PHONY: rename_branch
+rename_branch: build-github
+	docker compose run github rename_branch $(OLD_NAME) $(NEW_NAME)
+
 .PHONY: pull_request
 pull_request:
 	docker compose run github create_pull_request $(BRANCH)
