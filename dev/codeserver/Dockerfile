@@ -25,7 +25,7 @@ RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && \
 ENV PATH="/usr/local/go/bin:$PATH"
 
 # Install code-server
-RUN curl -fsSL https://github.com/coder/code-server/releases/download/v4.17.1/code-server_4.17.1_amd64.deb -o /tmp/code-server.deb && \
+RUN curl -fsSL https://github.com/coder/code-server/releases/download/v4.21.2/code-server_4.21.2_amd64.deb -o /tmp/code-server.deb && \
     apt install -y /tmp/code-server.deb && \
     rm /tmp/code-server.deb
 

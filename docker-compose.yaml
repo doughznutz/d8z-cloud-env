@@ -52,8 +52,8 @@ services:
       context: .  # We check in the entire environment, so need visibility to .
       dockerfile: ./github/Dockerfile
     env_file: ./.env
-    #volumes:
-    #  - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+    volumes:
+      - /home/$USER/projects/$PROJECT:/src
     networks:
       - external_net
 
