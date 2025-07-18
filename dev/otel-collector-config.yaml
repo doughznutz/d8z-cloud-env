@@ -1,3 +1,5 @@
+# https://github.com/google-gemini/gemini-cli/blob/main/docs/telemetry.md
+
 receivers:
   otlp:
     protocols:
