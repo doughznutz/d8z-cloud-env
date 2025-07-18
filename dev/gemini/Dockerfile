@@ -26,9 +26,6 @@ RUN npm install -g .
 ARG USERNAME
 RUN groupadd $USERNAME && useradd -ms /bin/bash -g $USERNAME $USERNAME
 
-# Change ownership of the working directory
-# RUN chown -R $USERNAME:$USERNAME /gemini-cli
-
 # Switch to the non-root user
 # USER $USERNAME
 

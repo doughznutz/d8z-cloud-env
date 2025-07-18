@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -52,11 +55,12 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Handle("/", http.FileServer(http.Dir("./static")))
+	r.Get("/status", serviceStatus)
 
 	// Redirect VNC traffic through to the respective servers. 80->80
-	r.Handle("/vnc/*", ReverseProxy("http://vnc", "/vnc"))
-	r.Handle("/voideditor/*", ReverseProxy("http://voideditor", "/voideditor"))
-	r.Handle("/vscode/*", ReverseProxy("http://vscode", "/vscode"))
+	r.Handle("/vnc/*", ReverseProxy("http://vnc:6080", "/vnc"))
+	r.Handle("/voideditor/*", ReverseProxy("http://voideditor:6080", "/voideditor"))
+	r.Handle("/vscode/*", ReverseProxy("http://vscode:6080", "/vscode"))
 
 
 	// Things that need a port change or https dont work here.
@@ -70,3 +74,28 @@ func main() {
 	log.Fatal(http.ListenAndServe(":80", r))
 
 }
+
+func serviceStatus(w http.ResponseWriter, r *http.Request) {
+	services := map[string]string{
+		"vnc":         "vnc:6080",
+		"voideditor":  "voideditor:6080",
+		"vscode":      "vscode:6080",
+		"codeserver":  "codeserver:8080",
+		"dozzle":      "dozzle:8080",
+		"adminer":     "adminer:8080",
+	}
+
+	status := make(map[string]string)
+	for name, address := range services {
+		_, err := net.DialTimeout("tcp", address, 1*time.Second)
+		if err != nil {
+			status[name] = "down"
+		} else {
+			status[name] = "running"
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+

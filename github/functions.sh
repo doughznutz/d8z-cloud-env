@@ -210,7 +210,7 @@ rename_branch() {
     echo "Renaming branch '$OLD_NAME' to '$NEW_NAME'..."
 
     # Rename the branch on GitHub
-    RESPONSE=$(curl -s -o /dev/null -w "%{\http_code}" \
+    RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
         -H "$AUTH_HEADER" \
         -H "Accept: application/vnd.github+json" \
         -X POST "$GITHUB_API/repos/$GITHUB_ORG/$GITHUB_REPO/branches/$OLD_NAME/rename" \

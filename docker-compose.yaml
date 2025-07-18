@@ -191,6 +191,21 @@ services:
       internal_net:
       external_net: {}
 
+# OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./dev/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./logs/otel-collector:/etc/otel-logs
+    #ports:
+    #  - "4318:4318" # OTLP HTTP receiver
+    #  - "4317:4317" # OTLP HTTP receiver
+    networks:
+      - internal_net
+    #  - external_net
+
 # Gemini CLI container
   gemini:
     image: dev:gemini
@@ -199,7 +214,8 @@ services:
       context: ./dev/gemini
       args:
         USERNAME: ${USER}
-    #environment:
+    depends_on:
+      - otel-collector
     #  - GEMINI_API_KEY=NO_KEYS_ALLOWED
     #  - GEMINI_BASE_URL=http://litellm:4000
     env_file:
