@@ -5,6 +5,9 @@ SERVICES += base docker cloud
 base_BUILD_DEPS :=
 base_RUN_DEPS :=
 
+SERVICES += gemini otel-collector
+gemini_RUN_DEPS := otel-collector
+
 # Development Environment Containers
 # Dashboard is Our entry point into the system.
 SERVICES += dashboard

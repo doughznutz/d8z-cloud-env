@@ -85,7 +85,7 @@ func insert_into_ollama_logs(dbEntry *OpenAILog) error {
 	port := 5432
 	user := "doughznutz"
 	password := os.Getenv("POSTGRES_PASSWORD")
-	dbname := "openai_logs"
+	dbname := "ollama_logs"
 
 	// Use the new prettifyJSON function
 	requestJSON, err := prettifyJSON(dbEntry.Request)
@@ -103,7 +103,7 @@ func insert_into_ollama_logs(dbEntry *OpenAILog) error {
 	)
 
 	// Connect
-	db, err := sql.Open("ollamadb", psqlInfo)
+	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func insert_into_ollama_logs(dbEntry *OpenAILog) error {
 
 	// Insert
 	_, err = db.Exec(
-		`INSERT INTO openai_logs (user_id, model, request, response)
+		`INSERT INTO ollama_logs (user_id, model, request, response)
         VALUES ($1, $2, $3, $4)`,
 		dbEntry.UserID,
 		dbEntry.Model,
