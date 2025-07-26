@@ -1,0 +1,11 @@
+{
+  "theme": "Default",
+  "selectedAuthType": "gemini-api-key"
+
+  "telemetry": {
+    "enabled": true,
+    "target": "local",
+    "otlpEndpoint": "http://otel-collector:4317",
+    "logPrompts": true
+  }
+}

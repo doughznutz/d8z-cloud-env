@@ -20,3 +20,5 @@ alias vnc='make up-base'
 alias vscode='make up-vscode'
 alias code-server='make up-vscodecloud'
 
+# gemini now
+alias gemini='make run-gemini'

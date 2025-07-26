@@ -53,7 +53,7 @@ services:
       dockerfile: ./github/Dockerfile
     env_file: ./.env
     volumes:
-      - /home/$USER/projects/$PROJECT:/src
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
     networks:
       - external_net
 
@@ -193,18 +193,18 @@ services:
 
 # OpenTelemetry Collector
   otel-collector:
-    image: otel/opentelemetry-collector:latest
+    build: ./dev/otel-collector
     container_name: otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - ./dev/otel-collector-config.yaml:/etc/otel-collector-config.yaml
-      - ./logs/otel-collector:/etc/otel-logs
-    #ports:
-    #  - "4318:4318" # OTLP HTTP receiver
-    #  - "4317:4317" # OTLP HTTP receiver
+      - /home/doughznutz/OtelJournal:/var/lib/otel
+    env_file: ./.env
+    environment:
+      - POSTGRES_DB=gemini_logs
+    depends_on:
+      - geminidb
     networks:
       - internal_net
-    #  - external_net
 
 # Gemini CLI container
   gemini:
