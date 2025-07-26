@@ -43,6 +43,11 @@ $(foreach service,$(SERVICES), \
   docker compose rm -f $(service) --remove-orphans) \
 )
 $(foreach service,$(SERVICES), \
+  $(eval .PHONY: run-$(service)) \
+  $(eval run-$(service): stop-$(service) ; \
+  docker compose run $(service) --remove-orphans) \
+)
+$(foreach service,$(SERVICES), \
   $(eval .PHONY: restart-$(service)) \
   $(eval restart-$(service): ; \
   docker compose restart $(service)) \

@@ -40,7 +40,6 @@ RUN apt-get install -y nodejs
 # Install Gemini CLI globally
 RUN npm install -g @google/gemini-cli
 
-
 # Add a non-root User.
 ARG USERNAME
 ARG PASSWORD

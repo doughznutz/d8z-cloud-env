@@ -1,5 +1,8 @@
 #!/bin/bash
 
+SELF_DIR=/docker/self
+PROJECT_DIR=/home/${USER}/projects/${PROJECT}
+
 # Function to check if the repository exists
 check_repo() {
     RESPONSE=$(curl -s -o /dev/null -w "%{\nhttp_code}" -H "$AUTH_HEADER" "$GITHUB_API/repos/$GITHUB_ORG/$GITHUB_REPO")
@@ -73,19 +76,19 @@ fetch_repo() {
 
 # Function to diff the repo against the src directory
 diff_repo() {
-    echo "Diffing the repo against src..."
-
+    echo "Diffing repo files from project directory: $PROJECT_DIR against $GITHUB_REPO"
     git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
-
-    # Copy files from the source directory
-    SOURCE_DIR="/src"
-    echo "Diffing repo files from source directory: $SOURCE_DIR against $GITHUB_REPO"
-    diff -r "$SOURCE_DIR"/ "$GITHUB_REPO"/
+    diff -r "$PROJECT_DIR"/ "$GITHUB_REPO"/
 }
 
 # Function to create a new branch
 create_branch() {
     echo "Creating a new branch..."
+
+    if ! diff -qr --exclude='.*' "$SELF_DIR" "$PROJECT_DIR"; then
+        echo "Error: /docker/self and $PROJECT_DIR are not the same (ignoring hidden files). Exiting."
+        exit 1
+    fi
 
     git clone "https://$GITHUB_USER:$GITHUB_TOKEN@github.com/$GITHUB_ORG/$GITHUB_REPO.git"
     cd "$GITHUB_REPO"
@@ -99,10 +102,9 @@ create_branch() {
     git config --global user.name "$GITHUB_USER"
     git config --global user.email "${GITHUB_USER}@users.noreply.github.com"
 
-    # Copy files from the source directory
-    SOURCE_DIR="/src"
-    echo "Copying files from source directory: $SOURCE_DIR"
-    cp -R "$SOURCE_DIR"/* .
+    # Copy files from the project directory
+    echo "Copying files from project directory: $PROJECT_DIR"
+    cp -R "$PROJECT_DIR"/* .
 
     # MAIN_BRANCH="main"
     BRANCH_NAME="auto-update-$(date +%s)"
