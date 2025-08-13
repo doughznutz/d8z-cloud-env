@@ -24,7 +24,7 @@ exporters:
   debug:
     verbosity: detailed
   file:
-    path: /var/lib/otel/collector.log  # Specify the file path
+    path: /var/lib/otel/collector_${LOG_FILE_DATETIME}.log  # Specify the file path
     format: json  # Optional: Specify the format (json, text)
 
 service:

@@ -193,9 +193,10 @@ services:
 
 # OpenTelemetry Collector
   otel-collector:
-    build: ./dev/otel-collector
+    image: dev:otel-collector
     container_name: otel-collector
-    command: ["--config=/etc/otel-collector-config.yaml"]
+    build: ./dev/otel-collector
+    # command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - /home/doughznutz/OtelJournal:/var/lib/otel
     env_file: ./.env
