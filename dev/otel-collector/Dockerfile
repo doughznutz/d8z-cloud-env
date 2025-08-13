@@ -1,31 +1,31 @@
-# syntax=docker/dockerfile:1
+FROM ubuntu:latest
 
-# ==============================================================================
-# Builder Stage
-#
-# This stage builds the custom OpenTelemetry Collector with the pgexporter,
-# which is not included in the default collector image.
-# ==============================================================================
-FROM golang:1.22 as builder  
-# Use a golang image as the builder
-# It is a good practice to pin the image to a specific digest
-# e.g., FROM otel/opentelemetry-collector:0.90.1@sha256:....
+# Update and install necessary packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    gettext-base \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Download and install the OpenTelemetry Collector
+ARG OTEL_COLLECTOR_VERSION=0.90.1
+RUN wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_COLLECTOR_VERSION}/otelcol-contrib_${OTEL_COLLECTOR_VERSION}_linux_amd64.tar.gz && \
+    tar -xzf otelcol-contrib_${OTEL_COLLECTOR_VERSION}_linux_amd64.tar.gz && \
+    mv otelcol-contrib /opt/otelcol-contrib && \
+    rm otelcol-contrib_${OTEL_COLLECTOR_VERSION}_linux_amd64.tar.gz
 
-# Download and install the postgresql exporter
-# RUN go install github.com/open-telemetry/opentelemetry-collector-contrib/exporter/pgexporter@v0.90.1
+# Copy your configuration files and scripts
+COPY config.yaml.template /etc/otel-collector-config.yaml.template
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# ==============================================================================
-# Final Stage
-#
-# This stage creates the final, lean image by copying the built exporter
-# and the configuration file into the official collector image.
-# ==============================================================================
-FROM otel/opentelemetry-collector:0.90.1
-# It is a good practice to pin the image to a specific digest
-# e.g., FROM otel/opentelemetry-collector:0.90.1@sha256:....
+# Make the script executable
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Copy the custom exporter from the builder stage and the local config file
-# COPY --from=builder /go/bin/pgexporter /usr/bin/
-COPY config.yaml /etc/otel-collector-config.yaml
+# Create log directory (optional)
+RUN mkdir -p /var/log/otel-collector
+
+# Expose ports (adjust as needed based on your config)
+EXPOSE 4317 4318 55679
+
+# Set the command to run the script and then start the collector
+CMD ["/usr/local/bin/entrypoint.sh"]

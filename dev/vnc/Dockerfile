@@ -8,6 +8,7 @@ FROM dorowu/ubuntu-desktop-lxde-vnc
 RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E88979FB9B30ACF2
 RUN apt-get update && apt-get install -y \
     emacs \
+    jq \
     make \
     xsel \
     xterm \
