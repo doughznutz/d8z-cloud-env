@@ -173,7 +173,7 @@ func handleOpenAICompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	geminiReq := OpenAICompletionsToGemini(completionReq)
-	geminiResp, err := makeRequestToGemini(w, geminiReq)
+	geminiResp, err := makeRequestToGemini(r.Context(), w, geminiReq)
 	if err != nil {
 		return
 	}

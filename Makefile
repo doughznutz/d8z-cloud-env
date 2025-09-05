@@ -21,7 +21,7 @@ dozzle_RUN_DEPS := dashboard
 # Ollama (openai-API) gateway to all them LLMS, along with a database to store the request/response pairs.
 SERVICES += ollama
 ollama_BUILD_DEPS :=
-ollama_RUN_DEPS := ollamadb
+ollama_RUN_DEPS := ollamadb otel-collector
 
 SERVICES += litellm
 litellm_BUILD_DEPS :=

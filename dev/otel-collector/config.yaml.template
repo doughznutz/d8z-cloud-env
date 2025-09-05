@@ -1,43 +1,87 @@
+# --- RECEIVERS ---
+# Receivers are how data gets into the Collector.
 receivers:
+  # OTLP receiver for OTLP (OpenTelemetry Protocol) data.
   otlp:
     protocols:
+      # OTLP gRPC endpoint
       grpc:
         endpoint: "otel-collector:4317"
+      # OTLP HTTP endpoint
       http:
         endpoint: "otel-collector:4318"
 
+# --- PROCESSORS ---
+# Processors are used to process data before it is exported.
 processors:
+  # Batch processor batches telemetry data to reduce the number of outgoing requests.
   batch:
     send_batch_size: 100
     timeout: 10s
+  # Attributes processor modifies attributes of telemetry data.
   attributes:
     actions:
+      # Add a service.name attribute if it's not already present.
       - key: service.name
-        value: "gemini-cli"
-        action: upsert
+        value: "unknown-service"
+        action: insert
+  # Memory limiter processor prevents the Collector from consuming too much memory.
   memory_limiter:
     check_interval: 1s
     limit_mib: 200
     spike_limit_mib: 50
+  # Routing processor routes telemetry data to different exporters based on attributes.
+  routing:
+    attribute_source: resource
+    from_attribute: service.name
+    default_exporters: [debug, file/default]
+    table:
+      - value: "ollama-proxy"
+        exporters: [debug, file/ollama]
+      - value: "ollama-gatewai"
+        exporters: [debug, file/og]
+      - value: "gemini-cli"
+        exporters: [debug, file/gemini]
 
+# --- EXPORTERS ---
+# Exporters are used to send data to one or more backends.
 exporters:
+  # Debug exporter prints telemetry data to the console.
   debug:
     verbosity: detailed
-  file:
-    path: /var/lib/otel/collector_${LOG_FILE_DATETIME}.log  # Specify the file path
-    format: json  # Optional: Specify the format (json, text)
+  # Default file exporter for general logs.
+  file/default:
+    path: /var/lib/otel/collector_${LOG_FILE_DATETIME}.log
+    format: json
+  # File exporter for ollama-proxy logs.
+  file/ollama:
+    path: /var/lib/otel/ollama-proxy_${LOG_FILE_DATETIME}.log
+    format: json
+  # File exporter for ollama-gatewai logs.
+  file/og:
+    path: /var/lib/otel/ollama-gatewai_${LOG_FILE_DATETIME}.log
+    format: json
+  # File exporter for gemini-cli logs.
+  file/gemini:
+    path: /var/lib/otel/gemini-cli_${LOG_FILE_DATETIME}.log
+    format: json
 
+# --- SERVICE ---
+# The service section is where the pipelines are configured.
 service:
   pipelines:
+    # Traces pipeline
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch, attributes]
+      processors: [memory_limiter, batch, attributes, routing]
       exporters: [debug]
+    # Metrics pipeline
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch, attributes]
+      processors: [memory_limiter, batch, attributes, routing]
       exporters: [debug]
+    # Logs pipeline
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch, attributes]
-      exporters: [debug, file]
+      processors: [memory_limiter, batch, attributes, routing]
+      exporters: [debug, file/default, file/ollama, file/og, file/gemini]
