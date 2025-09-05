@@ -7,6 +7,11 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	//"go.opentelemetry.io/otel/trace"
 )
 
 const openaiURL = "https://api.openai.com/v1/chat/completions"
@@ -50,6 +55,9 @@ type OpenAIChatCompletionUsage struct {
 // ==== Handlers ====
 
 func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ollama-proxy").Start(r.Context(), "handleOpenAIChat")
+	defer span.End()
+
 	log.Printf("Received V1/Chat/Completion request: %v", r.Body)
 
 	var chatReq OpenAIChatRequest
@@ -72,11 +80,12 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error marshalling chatReq to JSON:", err)
 	}
+	span.SetAttributes(attribute.String("request.body", string(dbEntry.Request)))
 
 	// Branch off here to Gemini baed on chatReq.Model
 	if chatReq.Model == "gemini-2.0-flash" {
 		geminiReq := OpenAIChatToGemini(chatReq)
-		geminiResp, err := makeRequestToGemini(w, geminiReq)
+		geminiResp, err := makeRequestToGemini(r.Context(), w, geminiReq)
 		if err != nil {
 			return
 		}
@@ -87,6 +96,7 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Println("Error marshalling geminiReq to JSON:", err)
 		}
+		span.SetAttributes(attribute.String("response.body", string(dbEntry.Response)))
 
 		// This function shouldnt bother returning...just log the error inside it.
 		if err := insert_into_ollama_logs(dbEntry); err != nil {
@@ -106,7 +116,7 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 		reqURL, reqAPIKey = groqURL, groqAPIKey
 	}
 
-	openaiReq, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(chatReqBody))
+	openaiReq, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(chatReqBody))
 	if err != nil {
 		http.Error(w, "failed to create request", http.StatusInternalServerError)
 		return
@@ -116,7 +126,9 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	openaiReq.Header.Set("Content-Type", "application/json")
 	openaiReq.Header.Set("Accept", "text/event-stream") // Important for SSE
 
-	client := &http.Client{}
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
 	resp, err := client.Do(openaiReq)
 	if err != nil {
 		http.Error(w, "error contacting OpenAI", http.StatusBadGateway)
@@ -155,6 +167,16 @@ func handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error marshalling OpenAIChatResponse to JSON:", err)
 	}
+	span.SetAttributes(attribute.String("response.body", string(dbEntry.Response)))
+
+	// Log the request
+	logAttributes := map[string]string{
+		"service.name":     "ollama-proxy",
+		"event.name":       "openai_api_request",
+		"request_payload":  string(dbEntry.Request),
+		"response_payload": string(dbEntry.Response),
+	}
+	LogDataType(ctx, "Logging OpenAI Request Response", logAttributes)
 
 	// This function shouldnt bother returning...just log the error inside it.
 	if err := insert_into_ollama_logs(dbEntry); err != nil {

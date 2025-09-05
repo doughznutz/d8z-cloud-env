@@ -1,9 +1,9 @@
 # ---------- Stage 1: Build ----------
-FROM golang:1.21 AS builder
+FROM golang:1.23 AS builder
 
 WORKDIR /app
 # Copy the Go source code
-COPY ./*.go .
+COPY ./*.go ./
 
 # Initialize go module if go.mod doesn't exist (useful for standalone main.go)
 # If you have go.mod and go.sum, these RUN lines can be replaced with:

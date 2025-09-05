@@ -2,12 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // ==== Types ====
@@ -141,15 +146,29 @@ func OpenAIChatToGemini(req OpenAIChatRequest) GeminiRequest {
 
 // ==== Gemini Functions ====
 
-func makeRequestToGemini(w http.ResponseWriter, req GeminiRequest) (*GeminiResponse, error) {
+func makeRequestToGemini(ctx context.Context, w http.ResponseWriter, req GeminiRequest) (*GeminiResponse, error) {
+	ctx, span := otel.Tracer("ollama-proxy").Start(ctx, "makeRequestToGemini")
+	defer span.End()
+
 	var geminiResp GeminiResponse
 	reqBody, err := json.Marshal(req)
 	if err != nil {
 		log.Printf("Gemini JSON marshalling error: %v", err)
 	}
+	span.SetAttributes(attribute.String("request.body", string(reqBody)))
+
 	// Make request to Gemini
 	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiAPIKey
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		log.Printf("Gemini request creation error: %v", err)
+		http.Error(w, "Gemini request creation failed", http.StatusInternalServerError)
+		return &geminiResp, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		log.Printf("Gemini error: %v", err)
 		http.Error(w, "Gemini request failed", http.StatusBadGateway)
@@ -166,6 +185,7 @@ func makeRequestToGemini(w http.ResponseWriter, req GeminiRequest) (*GeminiRespo
 
 	body, _ := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
+	span.SetAttributes(attribute.String("response.body", string(body)))
 
 	if err := json.Unmarshal(body, &geminiResp); err != nil {
 		http.Error(w, "Failed to parse Gemini response", http.StatusInternalServerError)
@@ -248,6 +268,9 @@ func streamGeminiToOpenAIChat(w http.ResponseWriter, resp *GeminiResponse) {
 }
 
 func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
+	ctx, span := otel.Tracer("ollama-proxy").Start(r.Context(), "handleGeminiChat")
+	defer span.End()
+
 	log.Printf("Received V1/Chat/Completion request: %v", r.Body)
 
 	var geminiReq GeminiRequest
@@ -267,8 +290,9 @@ func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error marshalling chatReq to JSON:", err)
 	}
+	span.SetAttributes(attribute.String("request.body", string(dbEntry.Request)))
 
-	geminiResp, err := makeRequestToGemini(w, geminiReq)
+	geminiResp, err := makeRequestToGemini(ctx, w, geminiReq)
 	if err != nil {
 		return
 	}
@@ -278,6 +302,7 @@ func handleGeminiChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error marshalling geminiReq to JSON:", err)
 	}
+	span.SetAttributes(attribute.String("response.body", string(dbEntry.Response)))
 
 	// This function shouldnt bother returning...just log the error inside it.
 	if err := insert_into_ollama_logs(dbEntry); err != nil {

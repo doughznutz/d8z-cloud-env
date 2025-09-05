@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp" 
 )
 
 var openaiAPIKey = os.Getenv("OPENAI_API_KEY")
@@ -12,6 +14,12 @@ var groqAPIKey = os.Getenv("GROQ_API_KEY")
 
 // ==== Main ====
 func main() {
+	tp, err := initTracer()
+	if err != nil {
+		log.Fatalf("failed to initialize tracer: %v", err)
+	}
+	defer shutdownTracer(tp)
+
 	port := "11434"
 	if envPort := os.Getenv("PORT"); envPort != "" {
 		port = envPort
@@ -33,6 +41,8 @@ func main() {
 	// Default route for unknown endpoints
 	mux.HandleFunc("/", handleNotFound)
 
+	handler := otelhttp.NewHandler(mux, "ollama-proxy")
+
 	log.Printf("Ollama proxy server running on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
