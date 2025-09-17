@@ -18,6 +18,18 @@ echo ".env" >> .gitignore
 
 # Main logic to handle command-line arguments
 case "$1" in
+    help)
+        echo "Usage: $0 {command}"
+        echo "Available commands:"
+        echo "  check_repo"
+        echo "  create_repo <description>"
+        echo "  diff_repo"
+        echo "  fetch_repo <dest_dir>"
+        echo "  create_branch <branch_name>"
+        echo "  create_pull_request <branch_name>"
+        echo "  rebase_repo"
+        echo "  rename_branch <old_name> <new_name>"
+        ;;
     check_repo)
         check_repo
         ;;
@@ -54,11 +66,7 @@ case "$1" in
         fi
         rename_branch "$2" "$3"
         ;;
-    bash)
-        exec /bin/bash
-        ;;
     *)
-        echo "Usage: $0 {check_repo|create_repo|diff_repo|fetch_repo <dest_dir>|create_branch <|clean>|create_pull_request <branch_name>|rebase_repo|rename_branch <old_name> <new_name>|bash}"
-        exit 1
+        exec "$@"
         ;;
 esac

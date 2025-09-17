@@ -2,7 +2,7 @@ FROM ubuntu:latest
 
 # Install Docker tools
 RUN apt-get update \
-    && apt-get install -y docker.io \
+    && apt-get install -y docker.io curl jq \
     && apt-get clean
 
 # Install docker-compose
@@ -14,9 +14,9 @@ RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 # This is to help track the Docker hierarchy
 COPY . /docker/self
 
-# Just a shell environment to get started.
-CMD ["/bin/bash"]
+# Add Docker Hub functions and entrypoint
+COPY functions.sh .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["./entrypoint.sh"]
 
-# Entrypoint for the container
-#COPY *.conf /etc/supervisor/conf.d/
-#CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

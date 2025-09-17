@@ -38,6 +38,7 @@ services:
     container_name: docker
     build:
       context: ./docker
+    env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
       - /var/run/docker.sock:/var/run/docker.sock # For DinD
@@ -109,9 +110,7 @@ services:
       args:
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD:-none}
-    env_file: 
-      - ./.env
-      - ./.keys
+    env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
       - /var/run/docker.sock:/var/run/docker.sock # For DinD
@@ -149,9 +148,7 @@ services:
     ports:
     #  - 8081:8080  # Access: http://localhost:8080
       - 443:8080  # Use this port in the cloud for now.
-    env_file:
-      - ./.env
-      - ./.keys
+    env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
       - /var/run/docker.sock:/var/run/docker.sock # For DinD
@@ -166,27 +163,7 @@ services:
     container_name: ollama
     build:
       context: ./dev/ollama
-    env_file:
-        - ./.env
-        - ./.keys
-    networks:
-      internal_net:
-      external_net: {}
-
-# LiteLLM AI gateway service
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: litellm
-    depends_on:
-      - geminidb
-    ports:
-      - "4000:4000"
-    volumes:
-      - ./dev/litellm/config.yaml:/app/config.yaml
-    command: ["--config", "/app/config.yaml"]
-    env_file:
-        - ./.env
-        - ./.keys
+    env_file: ./.env
     networks:
       internal_net:
       external_net: {}
@@ -196,14 +173,9 @@ services:
     image: dev:otel-collector
     container_name: otel-collector
     build: ./dev/otel-collector
-    # command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - /home/doughznutz/OtelJournal:/var/lib/otel
     env_file: ./.env
-    environment:
-      - POSTGRES_DB=gemini_logs
-    depends_on:
-      - geminidb
     networks:
       - internal_net
 
@@ -217,19 +189,13 @@ services:
         USERNAME: ${USER}
     depends_on:
       - otel-collector
-    #  - GEMINI_API_KEY=NO_KEYS_ALLOWED
-    #  - GEMINI_BASE_URL=http://litellm:4000
-    env_file:
-      - ./.env
-      - ./.keys
+    env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
       - /var/run/docker.sock:/var/run/docker.sock # For DinD
     networks:
       - internal_net
       - external_net
-
-
 
 # Database and DB admin.
   adminer:
@@ -250,19 +216,6 @@ services:
       - POSTGRES_DB=ollama_logs
     volumes:
       - /home/doughznutz/OllamaJournal:/var/lib/postgresql/data
-    networks:
-      - internal_net
-
-  geminidb:
-    image: dev:geminidb
-    container_name: geminidb
-    build:
-      context: ./dev/geminidb
-    env_file: ./.env
-    environment:
-      - POSTGRES_DB=gemini_logs
-    volumes:
-      - /home/doughznutz/GeminiJournal:/var/lib/postgresql/data
     networks:
       - internal_net
 

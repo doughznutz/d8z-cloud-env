@@ -23,14 +23,9 @@ SERVICES += ollama
 ollama_BUILD_DEPS :=
 ollama_RUN_DEPS := ollamadb otel-collector
 
-SERVICES += litellm
-litellm_BUILD_DEPS :=
-litellm_RUN_DEPS := geminidb
-
-
 # Database containers
-SERVICES += adminer geminidb ollamadb 
-adminer_RUN_DEPS := dashboard geminidb ollamadb
+SERVICES += adminer ollamadb 
+adminer_RUN_DEPS := dashboard ollamadb
 
 # This VNC container has emacs, defines the USER/PASSWORD and is used as a base image for the other editors.
 SERVICES += vnc
