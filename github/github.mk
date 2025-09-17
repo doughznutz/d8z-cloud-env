@@ -23,8 +23,16 @@ rebase: build-github
 
 .PHONY: rename_branch
 rename_branch: build-github
+	@if [ -z "$(OLD_NAME)" ] || [ -z "$(NEW_NAME)" ]; then \
+		echo "Usage: make rename_branch OLD_NAME=<old_name> NEW_NAME=<new_name>"; \
+		exit 1; \
+	fi
 	docker compose run github rename_branch $(OLD_NAME) $(NEW_NAME)
 
 .PHONY: pull_request
 pull_request: build
+	@if [ -z "$(BRANCH)" ]; then \
+		echo "Usage: make pull_request BRANCH=<branch_name>"; \
+		exit 1; \
+	fi
 	docker compose run github create_pull_request $(BRANCH)
