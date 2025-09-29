@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SELF_DIR=/docker/self
+SELF_DIR=/self
 PROJECT_DIR=/home/${USER}/projects/${PROJECT}
 
 # Function to check if the repository exists
@@ -86,7 +86,7 @@ create_branch() {
     echo "Creating a new branch..."
 
     if ! diff -qr --exclude='.*' "$SELF_DIR" "$PROJECT_DIR"; then
-        echo "Error: /docker/self and $PROJECT_DIR are not the same (ignoring hidden files). Exiting."
+        echo "Error: $SELF_DIR and $PROJECT_DIR are not the same (ignoring hidden files). Exiting."
         exit 1
     fi
 

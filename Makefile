@@ -1,22 +1,11 @@
-# "base" environment container. 
-# docker and github containers will be for testing once merged into base.
-# These arent technically services, but are here for simplicity
-SERVICES += base docker cloud
-base_BUILD_DEPS :=
-base_RUN_DEPS :=
-
-SERVICES += gemini otel-collector
-gemini_RUN_DEPS := otel-collector
-
 # Development Environment Containers
 # Dashboard is Our entry point into the system.
-SERVICES += dashboard
-dashboard_BUILD_DEPS :=
-dashboard_RUN_DEPS :=
+SERVICES += dashboard dozzle
+dashboard_RUN_DEPS := dozzle
 
-SERVICES += dozzle
-dozzle_BUILD_DEPS :=
-dozzle_RUN_DEPS := dashboard
+# Gemini CLI with telemetry sends logs to otel-collector
+SERVICES += gemini otel-collector
+gemini_RUN_DEPS := otel-collector
 
 # Ollama (openai-API) gateway to all them LLMS, along with a database to store the request/response pairs.
 SERVICES += ollama
@@ -47,6 +36,7 @@ SERVICES += vscode
 vscode_BUILD_DEPS := vnc
 vscode_RUN_DEPS := dashboard ollama
 
-# Unfortunately order matters here.
-include github/github.mk
-include docker/docker.mk
+include env/github/github.mk
+include env/docker/dockerhub.mk
+
+include env/docker/services.mk

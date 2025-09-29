@@ -23,18 +23,10 @@ case "$1" in
         create_docker_repo
         ;;
     build_and_push_image)
-        if [ -z "$2" ]; then
-            echo "Usage: $0 build_and_push_image <image_name>"
-            exit 1
-        fi
-        build_and_push_image "$2"
+        build_and_push_image
         ;;
     pull_image)
-        if [ -z "$2" ]; then
-            echo "Usage: $0 pull_image <image_name>"
-            exit 1
-        fi
-        pull_image "$2"
+        pull_image
         ;;
     list_docker_repos)
         list_docker_repos

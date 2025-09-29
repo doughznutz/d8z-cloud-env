@@ -46,7 +46,8 @@ RUN code-server --install-extension Continue.continue \
     && code-server --install-extension dbaeumer.vscode-eslint \
     && code-server --install-extension bradlc.vscode-tailwindcss \
     && code-server --install-extension antfu.vite \
-    && code-server --install-extension golang.go
+    && code-server --install-extension golang.go \
+    && code-server --install-extension GoogleCloudTools.cloudcode
 
 USER root
 

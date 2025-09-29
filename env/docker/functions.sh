@@ -50,18 +50,12 @@ create_docker_repo() {
 
 # Function to build and push a Docker image to Docker Hub
 build_and_push_image() {
-    if [ -z "$1" ]; then
-        printf "Error: No image name given.\n" >&2
-        exit 1
-    fi
-
-    local image_name="$1"
-    local full_image_name="${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:${image_name}"
+    local full_image_name="${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:${DOCKER_HUB_IMAGE}"
 
     printf "Building and pushing Docker image: %s\n" "${full_image_name}"
 
     # Build the Docker image
-    docker build -t "${full_image_name}" .
+    docker build -t "${full_image_name}" -f /path/to/Dockerfile .
 
     # Push the Docker image to Docker Hub
     docker login -u "${DOCKER_HUB_USERNAME}" -p "${DOCKER_HUB_TOKEN}"
@@ -72,13 +66,7 @@ build_and_push_image() {
 
 # Function to pull a Docker image from Docker Hub
 pull_image() {
-    if [ -z "$1" ]; then
-        printf "Error: No image name given.\n" >&2
-        exit 1
-    fi
-
-    local image_name="$1"
-    local full_image_name="${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:${image_name}"
+    local full_image_name="${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:${DOCKER_HUB_IMAGE}"
 
     printf "Pulling Docker image: %s\n" "${full_image_name}"
 

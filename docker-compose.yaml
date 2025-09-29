@@ -4,15 +4,15 @@
 # AI Agents enabled via API_KEYS routed through a local ollama proxy server.
 
 services:
-  # Base container - builds the base image
-  base:
-    image: env:base
-    container_name: base
+  env:
+    image: d8z-cloud-env
+    container_name: d8z-cloud-env
     build:
-      context: ./base
+      context: .
+      dockerfile: ./env/Dockerfile
     env_file: ./.env
     volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      - /home/$USER/projects:/home/$USER/projects
       - /var/run/docker.sock:/var/run/docker.sock # For DinD
     networks:
       - external_net
@@ -22,7 +22,8 @@ services:
     image: env:cloud
     container_name: cloud
     build:
-      context: ./cloud
+      context: .
+      dockerfile: ./env/cloud/Dockerfile
     env_file: ./.env
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/creds.json
@@ -37,7 +38,8 @@ services:
     image: env:docker
     container_name: docker
     build:
-      context: ./docker
+      context: .
+      dockerfile: ./env/docker/Dockerfile
     env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
@@ -51,7 +53,7 @@ services:
     container_name: github
     build:
       context: .  # We check in the entire environment, so need visibility to .
-      dockerfile: ./github/Dockerfile
+      dockerfile: ./env/github/Dockerfile
     env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
@@ -187,8 +189,6 @@ services:
       context: ./dev/gemini
       args:
         USERNAME: ${USER}
-    depends_on:
-      - otel-collector
     env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
