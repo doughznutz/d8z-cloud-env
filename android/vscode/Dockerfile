@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y code
 # Install the Flutter extension
 RUN HOME=/home/doughznutz code-server --install-extension dart-code.flutter
 RUN HOME=/home/doughznutz code-server --install-extension Continue.continue
+RUN HOME=/home/doughznutz code-server --install-extension GoogleCloudTools.cloudcode
 
 # Expose the port that code-server listens on.
 EXPOSE 8080

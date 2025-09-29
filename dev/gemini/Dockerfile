@@ -26,12 +26,10 @@ RUN npm install -g .
 ARG USERNAME
 RUN groupadd $USERNAME && useradd -ms /bin/bash -g $USERNAME $USERNAME
 
-COPY ./settings.json /home/$USERNAME/.gemini/settings.json
-
 # Switch to the non-root user
-# USER $USERNAME
+USER $USERNAME
 
 # Run gemini.
-# CMD ["npm", "start"]
+COPY ./settings.json /home/$USERNAME/.gemini/settings.json
 CMD ["bash", "-c", "cd /home/$USER/projects/$PROJECT && gemini --telemetry"]
 

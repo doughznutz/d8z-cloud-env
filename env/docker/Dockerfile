@@ -2,7 +2,7 @@ FROM ubuntu:latest
 
 # Install Docker tools
 RUN apt-get update \
-    && apt-get install -y docker.io curl jq \
+    && apt-get install -y docker.io dos2unix curl jq \
     && apt-get clean
 
 # Install docker-compose
@@ -12,11 +12,12 @@ ADD https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-l
 RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # This is to help track the Docker hierarchy
-COPY . /docker/self
+COPY . /self
 
-# Add Docker Hub functions and entrypoint
-COPY functions.sh .
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
-ENTRYPOINT ["./entrypoint.sh"]
+RUN find /self -name *.sh -exec dos2unix {} +
+RUN find /self -name *.sh -exec chmod +x {} +
+
+# Set the entrypoint
+ENTRYPOINT ["/self/env/docker/entrypoint.sh"]
+
 
