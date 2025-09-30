@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Source the functions
-. functions.sh
+. /self/env/docker/functions.sh
 
 case "$1" in
     help)

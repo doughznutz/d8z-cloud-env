@@ -15,19 +15,11 @@ docker-create-repo: build-docker
 
 .PHONY: docker-build-and-push
 docker-build-and-push: build-docker
-	@if [ -z "$(IMAGE_NAME)" ]; then \
-		echo "Usage: make docker-build-and-push IMAGE_NAME=<image_name>"; \
-		exit 1; \
-	fi
-	@docker compose run --rm docker build_and_push_image $(IMAGE_NAME)
+	@docker compose run --rm docker build_and_push_image 
 
 .PHONY: docker-pull
 docker-pull: build-docker
-	@if [ -z "$(IMAGE_NAME)" ]; then \
-		echo "Usage: make docker-pull IMAGE_NAME=<image_name>"; \
-		exit 1; \
-	fi
-	@docker compose run --rm docker pull_image $(IMAGE_NAME)
+	@docker compose run --rm docker pull_image 
 
 .PHONY: docker-list-repos
 docker-list-repos: build-docker
