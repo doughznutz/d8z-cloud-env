@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+PROJECT_DIR=/home/${USER}/projects/${PROJECT}
+
 # Function to check if jq is installed
 check_jq() {
     if ! command -v jq &> /dev/null; then
@@ -55,7 +57,7 @@ build_and_push_image() {
     printf "Building and pushing Docker image: %s\n" "${full_image_name}"
 
     # Build the Docker image
-    docker build -t "${full_image_name}" -f /path/to/Dockerfile .
+    docker build -t "${full_image_name}" -f ${PROJECT_DIR}/${DOCKER_HUB_DOCKERFILE} ${PROJECT_DIR}
 
     # Push the Docker image to Docker Hub
     docker login -u "${DOCKER_HUB_USERNAME}" -p "${DOCKER_HUB_TOKEN}"
