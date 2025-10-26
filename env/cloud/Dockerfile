@@ -4,6 +4,7 @@ FROM ubuntu:latest
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python-is-python3 \
     git \
     curl \
     dos2unix \
@@ -22,8 +23,14 @@ RUN mkdir -p /usr/local/gcloud \
 # Add gcloud to the PATH
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 
-# Install google-api-python-client and google-auth-httplib2
-#RUN pip3 install --no-cache-dir google-api-python-client google-auth-httplib2
+# Install Python libraries for the MCP server and GCP clients
+RUN pip3 install --no-cache-dir --break-system-packages \
+    fastapi \
+    uvicorn[standard] \
+    google-cloud-run \
+    google-cloud-compute \
+    google-cloud-storage \
+    google-cloud-secret-manager
 
 # Set the working directory
 WORKDIR /self
@@ -36,3 +43,4 @@ RUN find /self -name *.sh -exec chmod +x {} +
 
 # Set the entrypoint
 ENTRYPOINT ["/self/env/cloud/entrypoint.sh"]
+CMD ["mcp-server"]

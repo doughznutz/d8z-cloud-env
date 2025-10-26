@@ -82,3 +82,49 @@ list_instances() {
     echo "Listing instances in project '$CLOUD_PROJECT_ID'..."
     gcloud compute instances list --project="$CLOUD_PROJECT_ID"
 }
+
+# --- GCP Project Management Functions ---
+
+# Function to check for required variables for project management
+check_project_vars() {
+    if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+        echo "Error: GOOGLE_APPLICATION_CREDENTIALS environment variable is not set."
+        exit 1
+    fi
+    if [ ! -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+        echo "Error: Credentials file not found at '$GOOGLE_APPLICATION_CREDENTIALS'."
+        exit 1
+    fi
+}
+
+# Function to list accessible GCP projects.
+list_projects() {
+    check_project_vars
+    echo "Listing accessible projects..."
+    gcloud projects list
+}
+
+# Function to describe a GCP project.
+describe_project() {
+    check_project_vars
+    local PROJECT_ID=$1
+    if [ -z "$PROJECT_ID" ]; then
+        echo "Usage: describe-project <project-id>"
+        exit 1
+    fi
+    echo "Describing project '$PROJECT_ID'..."
+    gcloud projects describe "$PROJECT_ID"
+}
+
+# Function to set the active GCP project for the gcloud CLI.
+set_project() {
+    check_project_vars
+    local PROJECT_ID=$1
+    if [ -z "$PROJECT_ID" ]; then
+        echo "Usage: set-project <project-id>"
+        exit 1
+    fi
+    echo "Setting active gcloud project to '$PROJECT_ID'..."
+    gcloud config set project "$PROJECT_ID"
+    echo "Active project has been set. You can verify with 'gcloud config list'."
+}
