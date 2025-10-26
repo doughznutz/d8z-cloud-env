@@ -39,10 +39,12 @@ RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
 RUN apt-get install -y nodejs
 
 # Install Gemini CLI globally
-RUN npm install -g @google/gemini-cli
+RUN npm view @google/gemini-cli version > /tmp/gemini-cli-version \
+    && npm install -g @google/gemini-cli
 
 # Install Claude CLI globally #
-RUN npm install -g claude
+RUN npm view claude version > /tmp/claude-version \
+    && npm install -g claude
 
 # Add a non-root User.
 ARG USERNAME

@@ -30,8 +30,11 @@ services:
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
     # - ${GOOGLE_APPLICATION_CREDENTIALS_PATH}:/app/creds.json:ro
+    ports:
+      - "8085:8080"
     networks:
-      - external_net
+      internal_net:
+      external_net: {}
 
   # Docker-in-Docker container
   docker:

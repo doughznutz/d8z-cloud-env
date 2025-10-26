@@ -21,13 +21,6 @@ ADD https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-l
           /usr/libexec/docker/cli-plugins/docker-compose
 RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
-# Download and install the Google Cloud SDK
-RUN mkdir -p /usr/local/gcloud
-ADD https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz /usr/local/gcloud
-RUN tar -xzf /usr/local/gcloud/google-cloud-sdk.tar.gz -C /usr/local/gcloud && rm /usr/local/gcloud/google-cloud-sdk.tar.gz
-RUN /usr/local/gcloud/google-cloud-sdk/install.sh
-ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
-
 # Clean up unnecessary packages
 RUN apt-get autoremove -y && apt-get clean
 RUN rm -rf /var/lib/apt/lists/*
