@@ -27,17 +27,11 @@ SERVICES += codeserver
 codeserver_BUILD_DEPS := vnc
 codeserver_RUN_DEPS := dashboard ollama otel-collector
 
-# Open Sourced version of vscode with baked-in "void" Agent.
-# Removed from build as unused. 20251025
-# SERVICES += voideditor
-# voideditor_BUILD_DEPS := vnc
-# voideditor_RUN_DEPS := dashboard ollama
-
 # Both vscode (vnc) and code-server (web) using Continue plug-in Agent.
 # Removed from build as unneeded. 20251025
 # SERVICES += vscode
 # vscode_BUILD_DEPS := vnc
-# vscode_RUN_DEPS := dashboard ollama
+# vscode_RUN_DEPS := dashboard ollama otel-collector
 
 include env/github/github.mk
 include env/docker/dockerhub.mk

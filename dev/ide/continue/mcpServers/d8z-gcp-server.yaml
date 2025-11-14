@@ -1,0 +1,10 @@
+name: D8Z GCP MCP server
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: D8Z GCP MCP server
+    type: streamable-http
+    url: http://cloud:8080/mcp
+    # connectionTimeout: 120000 # 2 minutes in milliseconds
+
+

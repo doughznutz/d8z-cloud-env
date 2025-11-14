@@ -229,7 +229,18 @@ async def mcp_rpc_handler(request: Request):
     # --- Resource Methods (Stubs) ---
     elif method == "resources/list":
         print("Client requested resources list.")
-        response_data = {"result": {"resources": []}}
+        response_data = {"result": {"resources": [
+            {
+                "uri": "d8z://gcp/compute/instance/us-central1-a/example-instance",
+                "type": "gcp-compute-instance",
+                "name": "example-instance",
+                "description": "An example Compute Engine instance.",
+                "properties": {
+                    "zone": "us-central1-a",
+                    "status": "RUNNING"
+                }
+            }
+        ]}}
 
     elif method == "resources/templates/list":
         print("Client requested resource templates list.")
@@ -238,7 +249,14 @@ async def mcp_rpc_handler(request: Request):
     # --- Prompt Methods (Stubs) ---
     elif method == "prompts/list":
         print("Client requested prompts list.")
-        response_data = {"result": {"prompts": []}}
+        response_data = {"result": {"prompts": [
+            {
+                "id": "gcp-create-vm",
+                "title": "Create a new GCP Compute Engine VM",
+                "description": "A prompt to guide the user through creating a new virtual machine on Google Cloud.",
+                "template": "Create a new GCP Compute Engine VM named {{instance_name}} in zone {{zone}}."
+            }
+        ]}}
 
     else:
         response_data = {"error": {"code": -32601, "message": "Method not found"}}

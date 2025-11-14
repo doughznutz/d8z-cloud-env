@@ -128,8 +128,9 @@ services:
     image: dev:vscode
     container_name: vscode
     build:
-      context: ./dev/vscode
+      context: ./dev/ide
       args:
+        IDE_TYPE: vscode
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD}
     env_file: ./.env
@@ -146,8 +147,9 @@ services:
     image: dev:codeserver
     container_name: codeserver
     build:
-      context: ./dev/codeserver
+      context: ./dev/ide
       args:
+        IDE_TYPE: codeserver
         USERNAME: ${USER}
         PASSWORD: ${DOCKER_PASSWORD}
     ports:
