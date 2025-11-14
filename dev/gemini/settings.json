@@ -1,6 +1,11 @@
 {
   "theme": "Default",
-  "selectedAuthType": "gemini-api-key"
+  "selectedAuthType": "gemini-api-key",
+
+  "model-context-protocol": {
+    "enabled": true,
+    "mcpServerUrl": "http://cloud:8080/mcp"
+  },
 
   "telemetry": {
     "enabled": true,

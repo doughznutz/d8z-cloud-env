@@ -1,5 +1,3 @@
-# FILE: env/base/Dockerfile
-
 # Use dorowu/ubuntu-desktop-lxde-vnc as the base image
 #> docker pull dorowu/ubuntu-desktop-lxde-vnc
 FROM dorowu/ubuntu-desktop-lxde-vnc
@@ -19,9 +17,6 @@ EXPOSE 5900 6080
 
 # Setup the VNC dimensions...override in docker-compose.yaml
 ENV RESOLUTION=1920x1080
-
-# This Copy ourselves into the container at /docker/self
-COPY . /docker/self
 
 # Install Docker tools
 RUN apt-get update \
@@ -46,15 +41,16 @@ RUN npm view @google/gemini-cli version > /tmp/gemini-cli-version \
 RUN npm view claude version > /tmp/claude-version \
     && npm install -g claude
 
+# Install Continue CLI globally 
+RUN npm view  @continuedev/cli version > /tmp/continue-version \
+    && npm install -g @continuedev/cli
+
 # Add a non-root User.
 ARG USERNAME
 ARG PASSWORD
 RUN id -u $USERNAME 2>/dev/null || useradd -m -s /bin/bash $USERNAME
 RUN echo "$USERNAME:$PASSWORD" | chpasswd
 RUN usermod -aG sudo $USERNAME
-
-# Change to that user??
-#USER $USERNAME
 
 # Entrypoint for the container
 COPY *.conf /etc/supervisor/conf.d/
