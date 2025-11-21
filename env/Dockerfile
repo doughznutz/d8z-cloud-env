@@ -10,6 +10,16 @@ RUN apt-get update \
     && apt-get install -y git \
     && apt-get clean
 
+# Install Python
+RUN apt-get update \
+    && apt-get install -y python3 python3-pip python3-venv \
+    && apt-get clean
+
+# Install Node.js and npm
+RUN apt-get update \
+    && apt-get install -y nodejs npm \
+    && apt-get clean
+
 # Install Docker tools
 RUN apt-get update \
     && apt-get install -y docker.io \
@@ -33,5 +43,14 @@ COPY . /self
 RUN find /self -name *.sh -exec dos2unix {} +
 RUN find /self -name *.sh -exec chmod +x {} +
 
+# Setup MCP server
+COPY env/mcp /app/mcp
+RUN python3 -m venv /opt/venv_mcp
+RUN /opt/venv_mcp/bin/pip install --no-cache-dir -r /app/mcp/requirements.txt
+
+# Setup Node.js Entrypoint Client
+COPY env/entrypoint /app/entrypoint
+RUN npm install --prefix /app/entrypoint --no-audit --loglevel=error
+
 # Set the entrypoint
-ENTRYPOINT ["/self/env/entrypoint.sh"]
+ENTRYPOINT ["node", "/app/entrypoint/index.js"]

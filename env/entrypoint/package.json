@@ -1,0 +1,16 @@
+{
+  "name": "mcp-client",
+  "version": "1.0.0",
+  "description": "Node.js client for the MCP server to guide container setup.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "inquirer": "^8.2.4"
+  }
+}
