@@ -52,5 +52,9 @@ RUN /opt/venv_mcp/bin/pip install --no-cache-dir -r /app/mcp/requirements.txt
 COPY env/entrypoint /app/entrypoint
 RUN npm install --prefix /app/entrypoint --no-audit --loglevel=error
 
+# Copy the new startup script
+COPY env/startup.sh /app/startup.sh
+RUN chmod +x /app/startup.sh
+
 # Set the entrypoint
-ENTRYPOINT ["node", "/app/entrypoint/index.js"]
+ENTRYPOINT ["/app/startup.sh"]

@@ -10,6 +10,8 @@ services:
     build:
       context: .
       dockerfile: ./env/Dockerfile
+    stdin_open: true # Keep stdin open for interactive sessions
+    tty: true        # Allocate a TTY for a proper shell experience
     env_file: ./.env
     volumes:
       - /home/$USER/projects:/home/$USER/projects

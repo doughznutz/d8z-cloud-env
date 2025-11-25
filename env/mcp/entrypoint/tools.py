@@ -45,15 +45,6 @@ def check_projects_root_directory(**kwargs: Any) -> Dict[str, Any]:
     else:
         return {"status": "error", "message": f"The main projects directory '{projects_root}' does not exist."}
 
-def list_projects(**kwargs: Any) -> Dict[str, Any]:
-    """Lists subdirectories in the /home/{USER}/projects directory."""
-    projects_root = get_projects_root()
-    if not os.path.isdir(projects_root):
-        raise FileNotFoundError(f"Projects root directory '{projects_root}' not found.")
-    
-    subdirs = [d for d in os.listdir(projects_root) if os.path.isdir(os.path.join(projects_root, d))]
-    return {"status": "success", "projects": subdirs}
-
 def create_env_file(**kwargs: Any) -> Dict[str, Any]:
     """Creates the .env file from the example template."""
     if os.path.exists('.env'):
@@ -88,13 +79,23 @@ def create_project_directory(project_name: str, **kwargs: Any) -> Dict[str, Any]
     os.makedirs(project_path, exist_ok=True)
     return {"status": "success", "message": f"Project directory '{project_path}' created."}
 
-def git_clone(repo_url: str, project_name: str, **kwargs: Any) -> Dict[str, Any]:
+def git_clone(repo_url: str, project_name: str, debug: bool = False, **kwargs: Any) -> Dict[str, Any]:
     """Clones a Git repository into the projects directory."""
     projects_root = get_projects_root()
     project_path = os.path.join(projects_root, project_name)
     command = ["git", "clone", repo_url, project_path]
-    subprocess.run(command, check=True, capture_output=True, text=True)
-    return {"status": "success", "message": f"Repository '{repo_url}' cloned to '{project_path}'."}
+
+    result = subprocess.run(command, check=True, capture_output=True, text=True)
+
+    response = {"status": "success", "message": f"Repository '{repo_url}' cloned to '{project_path}'."}
+    if debug:
+        response["debug_info"] = {
+            "command": " ".join(command),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode
+        }
+    return response
 
 def get_env_var(key: str, **kwargs: Any) -> Dict[str, Any]:
     """Reads a specific variable from the .env file."""
@@ -117,11 +118,10 @@ def check_project_directory_exists(project_name: str, **kwargs: Any) -> Dict[str
     else:
         return {"status": "error", "message": f"Project directory '{project_path}' does not exist."}
 
-def launch_ide(ide_name: str, **kwargs: Any) -> Dict[str, Any]:
+def launch_ide(ide_name: str, debug: bool = False, **kwargs: Any) -> Dict[str, Any]:
     """Builds and starts a specific IDE service using docker compose."""
     # Mapping of simple names to docker-compose service names
     ide_service_map = {
-        "terminal": "env", # This service is already running, but we can treat it as a no-op
         "vnc": "vnc",
         "vscode": "vscode",
         "codeserver": "codeserver"
@@ -130,16 +130,26 @@ def launch_ide(ide_name: str, **kwargs: Any) -> Dict[str, Any]:
     if not service_name:
         raise ValueError(f"Invalid IDE name '{ide_name}'.")
 
-    if service_name == "env":
-        return {"status": "success", "message": "Terminal is already running. You can attach a new shell."}
-        
     command = ["docker", "compose", "up", "-d", "--build", service_name]
     result = subprocess.run(command, capture_output=True, text=True)
     
+    debug_info = {
+        "command": " ".join(command),
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "returncode": result.returncode
+    }
+
     if result.returncode == 0:
-        return {"status": "success", "message": f"Successfully launched '{ide_name}'.", "output": result.stdout}
+        response = {"status": "success", "message": f"Successfully launched '{ide_name}'."}
+        if debug:
+            response["debug_info"] = debug_info
+        return response
     else:
-        return {"status": "error", "message": f"Failed to launch '{ide_name}'.", "error": result.stderr}
+        response = {"status": "error", "message": f"Failed to launch '{ide_name}'."}
+        if debug:
+            response["debug_info"] = debug_info
+        return response
 
 # ==============================================================================
 # Tool Registry
@@ -149,7 +159,6 @@ TOOL_REGISTRY = {
     "check_user_configuration": check_user_configuration,
     "check_docker_socket": check_docker_socket,
     "check_projects_root_directory": check_projects_root_directory,
-    "list_projects": list_projects,
     "create_env_file": create_env_file,
     "update_env_var": update_env_var,
     "create_project_directory": create_project_directory,
