@@ -1,141 +1,213 @@
-const axios = require('axios');
 const inquirer = require('inquirer');
 const { spawn } = require('child_process');
+const net = require('net');
 
-const MCP_SERVER_URL = 'http://127.0.0.1:8000';
-let pythonProcess;
+const ROUTER_HOST = '127.0.0.1';
+const ROUTER_PORT = 3456;
+const DEBUG_MODE = process.argv.includes('--debug');
 
 // Graceful exit
 process.on('SIGINT', () => {
-    if (pythonProcess) pythonProcess.kill('SIGINT');
     process.exit();
 });
 
-// --- MCP Tool Caller ---
-async function callMcpTool(tool, params = {}) {
-    try {
-        const response = await axios.post(`${MCP_SERVER_URL}/mcp`, { tool, params });
-        return response.data;
-    } catch (error) {
-        console.error(`
-Error calling tool '${tool}':`);
-        if (error.response) {
-            console.error(`Status: ${error.response.status}`);
-            console.error(`Details: ${JSON.stringify(error.response.data.detail, null, 2)}`);
-        } else {
-            console.error(error.message);
+// --- MCP Router Caller ---
+function callRouter(request) {
+    return new Promise((resolve, reject) => {
+        if (DEBUG_MODE) {
+            console.log(`\n[DEBUG] Calling router with request: ${JSON.stringify(request)}`);
         }
-        throw new Error(`MCP tool call failed for '${tool}'`);
-    }
-}
+        
+        const client = new net.Socket();
+        let responseData = '';
 
-// --- Server Lifecycle ---
-async function startPythonMcpServer() {
-    console.log('Starting Python MCP Server...');
-    pythonProcess = spawn('/opt/venv_mcp/bin/uvicorn', ['server:app', '--host', '0.0.0.0', '--port', '8000', '--app-dir', '/app/mcp']);
-    
-    pythonProcess.stdout.on('data', (data) => console.log(`Python Server: ${data.toString().trim()}`));
-    pythonProcess.stderr.on('data', (data) => console.error(`Python Server: ${data.toString().trim()}`));
+        client.connect(ROUTER_PORT, ROUTER_HOST, () => {
+            client.write(JSON.stringify(request) + '\n');
+        });
 
-    const maxRetries = 20;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            await axios.get(`${MCP_SERVER_URL}/health`);
-            console.log('Python MCP Server is healthy.');
-            return;
-        } catch (error) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-    }
-    throw new Error('Timed out waiting for Python MCP server.');
+        client.on('data', (data) => {
+            responseData += data.toString();
+            // Assuming the full response is sent in one go, ending with a newline.
+            if (responseData.endsWith('\n')) {
+                client.end();
+            }
+        });
+
+        client.on('close', () => {
+            try {
+                const response = JSON.parse(responseData);
+                if (DEBUG_MODE) {
+                    console.log(`[DEBUG] Raw response from router: ${JSON.stringify(response, null, 2)}`);
+                }
+                if (response.error) {
+                    throw new Error(response.error);
+                }
+                resolve(response.ok ? response.result : response);
+            } catch (e) {
+                console.error(`Error parsing response from router: ${e.message}`);
+                reject(new Error('Failed to communicate with the MCP router.'));
+            }
+        });
+
+        client.on('error', (err) => {
+            console.error(`Socket error: ${err.message}`);
+            reject(new Error(`Could not connect to MCP router at ${ROUTER_HOST}:${ROUTER_PORT}`));
+        });
+    });
 }
 
 // --- Setup Sequences ---
+async function connectDownstreamServer() {
+    console.log('Connecting downstream MCP server to the router...');
+    const cmd = ['/opt/venv_mcp/bin/python3', '/app/mcp/entrypoint/server.py', '--stdio'];
+    if (DEBUG_MODE) {
+        cmd.push('--debug');
+    }
+    try {
+        const result = await callRouter({
+            type: 'run_tool',
+            name: 'ROUTER_connect_local_server',
+            args: {
+                name: 'env',
+                cmd: cmd
+            }
+        });
+        if (result.ok) {
+            console.log('✅ Downstream server connected successfully.');
+        } else {
+            throw new Error(result.error || 'Failed to connect downstream server.');
+        }
+    } catch (error) {
+        console.error(`❌ Critical error connecting downstream server: ${error.message}`);
+        console.error('The application cannot continue. Please check the router and server logs.');
+        process.exit(1);
+    }
+}
+
 async function sequenceUserSetup() {
     console.log('\n--- Verifying User Configuration ---');
-    const result = await callMcpTool('check_user_configuration');
-
-    if (result.status === 'success') {
-        console.log(`✅ ${result.message}`);
-        return; // User is configured, we can proceed.
+    let envState = {};
+    try {
+        const envToolResult = await callRouter({ type: 'run_tool', name: 'ENV_get_environment' });
+        envState = envToolResult || {};
+    } catch (error) {
+        console.error(`Error reading environment: ${error.message}`);
+        // Exit because we cannot determine the state of the system
+        console.error('Cannot continue without environment information. Exiting.');
+        process.exit(1);
     }
 
-    if (result.error_code === 'ENV_FILE_MISSING') {
+    if (envState.USER) {
+        console.log(`✅ USER is configured as '${envState.USER}'.`);
+        return;
+    }
+
+    // Check if the file exists by checking if the object is empty
+    if (Object.keys(envState).length === 0) {
         console.log('INFO: .env file not found. A new one will be created.');
-        await callMcpTool('create_env_file');
+        await callRouter({ type: 'run_tool', name: 'ENV_create_dot_env_file' });
     }
 
     console.log("⚠️ The 'USER' variable must be set in your .env file.");
     const { username } = await inquirer.prompt({
         type: 'input', name: 'username', message: 'Please enter your host machine username (e.g., `whoami`):',
     });
-    await callMcpTool('update_env_var', { key: 'USER', value: username });
+    await callRouter({ type: 'run_tool', name: 'ENV_set_environment_variable', args: { key: 'USER', value: username } });
     
-    console.log('\nIMPORTANT: Your .env file has been updated.');
-    console.log('Please exit and restart the container for these changes to take effect.');
-    if ((await inquirer.prompt({ type: 'confirm', name: 'c', message: 'Exit now?', default: true })).c) {
+    console.log('\nIMPORTANT: Your .env file has been updated. A restart is required for changes to take effect.');
+    if ((await inquirer.prompt({ type: 'confirm', name: 'c', message: 'Exit now to restart?', default: true })).c) {
         process.exit(0);
     }
 }
 
 async function sequencePrerequisiteChecks() {
     console.log('\n--- Running Prerequisite Checks ---');
-    const checks = ['check_docker_socket', 'check_projects_root_directory'];
-    for (const check of checks) {
-        const result = await callMcpTool(check);
-        if (result.status === 'success') {
-            console.log(`✅ ${result.message}`);
-        } else {
+    // Note: 'check_projects_root_directory' was implicitly handled by the new server logic, so it was removed.
+    for (const check of ['check_docker_socket']) {
+        const result = await callRouter({ type: 'run_tool', name: `ENV_${check}` });
+        if (result.status !== 'success') {
             console.error(`❌ Prerequisite check failed: ${result.message}`);
             console.log('Exiting. Please fix the issue and restart the container.');
             process.exit(1);
         }
+        console.log(`✅ ${result.message}`);
     }
 }
 
-async function sequenceProjectSetup() {
-    console.log('\n--- Configuring Project ---');
-    let projectList = (await callMcpTool('list_projects')).projects;
+async function sequenceInteractiveProjectSetup() {
+    console.log('Starting interactive project setup...');
+    let projectList = [];
+    try {
+        const projToolResult = await callRouter({ type: 'run_tool', name: 'ENV_get_projects' });
+        projectList = projToolResult.projects || [];
+    } catch (error) {
+        console.error('Could not list projects:', error.message);
+    }
+    
     let projectName;
-
     const createNewProject = async () => {
-        const { p } = await inquirer.prompt({
-            type: 'input', name: 'p', message: 'Enter a name for your new project:',
-        });
-        const { c } = await inquirer.prompt({
-            type: 'confirm', name: 'c', message: 'Clone from a Git repository?', default: false,
-        });
-        if (c) {
-            const { repoUrl } = await inquirer.prompt({ type: 'input', name: 'repoUrl', message: 'Enter repository URL:' });
-            await callMcpTool('git_clone', { repo_url: repoUrl, project_name: p });
-        } else {
-            await callMcpTool('create_project_directory', { project_name: p });
-        }
+        const { p } = await inquirer.prompt({ type: 'input', name: 'p', message: 'Enter a name for your new project:' });
+        await callRouter({ type: 'run_tool', name: 'ENV_create_project_directory', args: { project_name: p } });
         return p;
     };
 
     if (projectList.length === 0) {
-        console.log('No projects found.');
         projectName = await createNewProject();
     } else {
-        const choices = [...projectList, new inquirer.Separator(), '<new>'];
+        projectList.sort();
         const { p } = await inquirer.prompt({
-            type: 'list', name: 'p', message: 'Please select your project:', choices: choices,
+            type: 'list', name: 'p', message: 'Please select your project:', choices: [...projectList, new inquirer.Separator(), '<new>'],
         });
-
-        if (p === '<new>') {
-            projectName = await createNewProject();
-        } else {
-            projectName = p;
-            console.log(`You selected '${projectName}'. Setting it as the current project.`);
-        }
+        projectName = (p === '<new>') ? await createNewProject() : p;
     }
 
-    await callMcpTool('update_env_var', { key: 'PROJECT', value: projectName });
-    console.log('\nIMPORTANT: The PROJECT variable has been set.');
-    console.log('Please restart the container for this change to be fully effective.');
-    if ((await inquirer.prompt({ type: 'confirm', name: 'c', message: 'Exit now?', default: true })).c) {
-        process.exit(0);
+    await callRouter({ type: 'run_tool', name: 'ENV_set_environment_variable', args: { key: 'PROJECT', value: projectName } });
+    console.log(`✅ Project set to '${projectName}'.`);
+    console.log('NOTE: A container restart is recommended for other services to pick up the new PROJECT variable.');
+    return projectName;
+}
+
+async function resolveProjectContext() {
+    console.log('\n--- Resolving Project Context ---');
+    let envState = {};
+    try {
+        const envToolResult = await callRouter({ type: 'run_tool', name: 'ENV_get_environment' });
+        envState = envToolResult || {};
+    } catch (error) {
+        console.error(`Error reading environment: ${error.message}`);
+    }
+
+    const projectName = envState.PROJECT;
+
+    if (projectName) {
+        const projToolResult = await callRouter({ type: 'run_tool', name: 'ENV_get_projects' });
+        if (projToolResult.projects && projToolResult.projects.includes(projectName)) {
+            console.log(`✅ Project '${projectName}' is set and directory exists.`);
+            return projectName;
+        }
+        console.log(`⚠️ Project is set to '${projectName}', but directory not found. Starting interactive setup...`);
+    }
+    
+    return await sequenceInteractiveProjectSetup();
+}
+
+async function sequenceIdeSelection(projectName) {
+    console.log('\n--- Select Your IDE ---');
+    const ideChoices = ['terminal', 'vnc', 'vscode', 'codeserver'];
+    ideChoices.sort();
+    const { ide } = await inquirer.prompt({
+        type: 'list', name: 'ide', message: 'Which IDE would you like to use?',
+        choices: ideChoices,
+    });
+
+    console.log(`Launching '${ide}' for project '${projectName}'...`);
+    const result = await callRouter({ type: 'run_tool', name: 'ENV_launch_ide', args: { ide_name: ide } });
+
+    if (result.status === 'success') {
+        console.log(`✅ ${result.message}`);
+    } else {
+        console.error(`❌ Failed to launch IDE: ${result.message}`);
+        console.error(result.error);
     }
 }
 
@@ -143,27 +215,150 @@ async function sequenceProjectSetup() {
 async function main() {
     try {
         console.log('--- Welcome to the d8z-cloud-env Container! ---');
-        await startPythonMcpServer();
+        // The router must be started externally. This client connects to it.
+        await connectDownstreamServer();
         await sequenceUserSetup();
         await sequencePrerequisiteChecks();
-        
-        // Check if PROJECT is already set by calling the tool.
-        const projectResult = await callMcpTool('check_user_configuration'); // This is a bit of a hack, let's assume if USER is set, PROJECT *could* be.
-        // A better approach would be a `check_env_var` tool. For now, we'll just check if the `projects` dir is empty or not to decide.
-        const projectList = (await callMcpTool('list_projects')).projects;
-        const projectEnv = process.env.PROJECT; // This won't be set yet until restart. We need a way to read from .env.
-        // Let's refine the logic. The user setup ensures USER is set. The project setup discovers or creates a project.
-        // The prompt to exit and restart is key. So, we just run the project setup.
-        
-        await sequenceProjectSetup();
+        const projectName = await resolveProjectContext();
+        await sequenceIdeSelection(projectName);
 
-        console.log('\n✨ Setup is complete but requires a restart. ✨');
-        console.log('The container will now exit. Please run the command again.');
-        process.exit(0);
+        await showMainMenu();
 
     } catch (error) {
-        console.error('\nA critical error occurred during the setup process.');
+        console.error(`\nA critical error occurred during the setup process: ${error.message}`);
         process.exit(1);
+    }
+}
+
+// --- Interactive Menu ---
+async function presentMenu(message, choices, { back = false, exit = false } = {}) {
+    const sortedChoices = [...choices].sort();
+
+    let finalChoices = sortedChoices;
+    if (back) {
+        finalChoices = ['Back', new inquirer.Separator(), ...sortedChoices];
+    }
+    if (exit) {
+        finalChoices.push(new inquirer.Separator(), 'Exit');
+    }
+
+    const { selection } = await inquirer.prompt({
+        type: 'list',
+        name: 'selection',
+        message: message,
+        choices: finalChoices,
+    });
+    return selection;
+}
+
+async function showMainMenu() {
+    while (true) {
+        console.log('\n--- What would you like to do next? ---');
+        const choice = await presentMenu('Please select an option:', ['Shell', 'Explore MCP Server'], { exit: true });
+
+        if (choice === 'Shell') {
+            await new Promise((resolve) => {
+                const shell = spawn('/bin/bash', [], { stdio: 'inherit' });
+                shell.on('close', resolve);
+            });
+        } else if (choice === 'Explore MCP Server') {
+            await showExplorerMenu();
+        } else if (choice === 'Exit') {
+            console.log('Exiting...');
+            return;
+        }
+    }
+}
+
+async function showExplorerMenu() {
+    let capabilities;
+
+    const formatForDisplay = (fullName) => {
+        const match = fullName.match(/^([A-Z0-9_]+)_([a-zA-Z0-9_].*)$/);
+        if (match) {
+            const prefix = match[1].toLowerCase().replace(/_/g, ' ');
+            const itemName = match[2];
+            return `${itemName} (${prefix})`;
+        }
+        return fullName;
+    };
+
+    try {
+        capabilities = await callRouter({ type: 'run_tool', name: 'ROUTER_list_registry' });
+    } catch (error) {
+        console.error('Error fetching server capabilities:', error.message);
+        return;
+    }
+
+    while (true) {
+        console.log('\n--- MCP Server Explorer ---');
+        // Dynamically create categories based on what's available
+        const availableCategories = [];
+        if (capabilities.agents && capabilities.agents.length > 0) availableCategories.push('Agents');
+        if (capabilities.resources && capabilities.resources.length > 0) availableCategories.push('Resources');
+        if (capabilities.tools && capabilities.tools.length > 0) availableCategories.push('Tools');
+
+        const category = await presentMenu('Select a category to explore:', availableCategories, { back: true });
+
+        if (category === 'Back') return;
+
+        const items = category === 'Agents' ? capabilities.agents :
+                      category === 'Resources' ? capabilities.resources :
+                      capabilities.tools;
+        const itemType = category.slice(0, -1).toLowerCase();
+
+        const displayNameMap = new Map(items.map(item => [formatForDisplay(item.name), item.name]));
+        const displayNames = items.map(item => formatForDisplay(item.name));
+        
+        const message = `Select a ${itemType} to inspect:`;
+        const selectedDisplayName = await presentMenu(message, displayNames, { back: true });
+
+        if (selectedDisplayName === 'Back') continue;
+
+        const originalName = displayNameMap.get(selectedDisplayName);
+        const selectedItem = items.find(item => item.name === originalName);
+
+        if (!selectedItem) continue;
+
+        if (itemType === 'agent') {
+            console.log(`\n--- Description for ${selectedDisplayName} ---\n${selectedItem.description}`);
+        } else if (itemType === 'resource') {
+            try {
+                const response = await callRouter({ type: 'access_resource', name: selectedItem.name });
+                // Displaying state for any potential future resources
+                console.log(`\n--- State of ${selectedDisplayName} ---\n`, response.state);
+            } catch (error) {
+                console.error(`Error fetching state for '${selectedDisplayName}':`, error.message);
+            }
+        } else if (itemType === 'tool') {
+            await runTool(selectedItem);
+        }
+    }
+}
+
+async function runTool(tool) {
+    console.log(`\n--- Running Tool: ${tool.name} ---\n${tool.description}`);
+
+    const params = {};
+    if (tool.parameters) {
+        for (const param of tool.parameters) {
+            if (param.required) {
+                const { value } = await inquirer.prompt({
+                    type: 'input',
+                    name: 'value',
+                    message: `Enter value for required parameter '${param.name}':`,
+                });
+                params[param.name] = value;
+            }
+        }
+    }
+
+    try {
+        const result = await callRouter({ type: 'run_tool', name: tool.name, args: params });
+        console.log('\n--- Tool Result ---');
+        console.log(JSON.stringify(result, null, 2));
+    } catch (error) {
+        // Error is already logged by callRouter
     }
 }
 
