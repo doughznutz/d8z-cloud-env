@@ -1,9 +1,12 @@
-# core/config_tools.py
+# tools/router_tools.py
 # High-level router management tools that will be registered into the registry as ROUTER_* tools.
-from .registry import MCPRegistry, Tool
-from .downstream_manager import DownstreamManager
+import logging
+from core.registry import MCPRegistry, Tool
+from core.downstream_manager import DownstreamManager
 
-def make_router_tools(registry: MCPRegistry, downstream: DownstreamManager):
+log = logging.getLogger(__name__)
+
+def make_tools(registry: MCPRegistry, downstream: DownstreamManager):
     tools = {}
 
     def connect_local_tool(args):

@@ -1,4 +1,5 @@
 # core/downstream_manager.py
+import logging
 import socket
 import subprocess
 import time
@@ -7,6 +8,8 @@ from typing import Dict, Any, Optional
 from .stdio_client import StdioMCPClient
 from .tcp_client import TCPMCPClient
 from .registry import MCPRegistry
+
+log = logging.getLogger(__name__)
 
 def _find_free_port():
     s = socket.socket()
@@ -24,6 +27,7 @@ class DownstreamManager:
         self._docker_containers: Dict[str, str] = {}  # name -> container id
 
     def connect_local(self, name: str, cmd: list):
+        log.info(f"Connecting to local downstream '{name}'")
         prefix = f"{name.upper()}_"
         client = StdioMCPClient(name=name, cmd=cmd, registry=self.registry, prefix=prefix)
         client.start()
@@ -31,6 +35,7 @@ class DownstreamManager:
         return client
 
     def disconnect_local(self, name: str):
+        log.info(f"Disconnecting local downstream '{name}'")
         client = self._local_clients.pop(name, None)
         if client:
             client.stop()
@@ -53,16 +58,20 @@ class DownstreamManager:
         Launch docker container mapping a free host port (hostport) to container:3456,
         then connect via TCP to hostport.
         """
+        log.info(f"Connecting to remote downstream '{name}' with image '{image}'")
         host_port = _find_free_port()
         # build docker run command
         args = ["docker", "run", "-d", "-p", f"{host_port}:3456"]
         if extra_args:
             args += extra_args
         args += [image]
+        log.info(f"Running command: {' '.join(args)}")
         proc = subprocess.run(args, capture_output=True, text=True)
         if proc.returncode != 0:
+            log.error(f"Docker run failed for image '{image}': {proc.stderr}")
             raise RuntimeError(f"docker run failed: {proc.stderr}")
         container_id = proc.stdout.strip()
+        log.info(f"Container '{container_id}' started for downstream '{name}'")
         # wait briefly for container to start
         time.sleep(1.0)
         prefix = f"{name.upper()}_"
@@ -73,6 +82,7 @@ class DownstreamManager:
         return container_id, client
 
     def disconnect_remote(self, name: str):
+        log.info(f"Disconnecting remote downstream '{name}'")
         client = self._tcp_clients.pop(name, None)
         cid = self._docker_containers.pop(name, None)
         if client:
@@ -89,6 +99,7 @@ class DownstreamManager:
             if a.startswith(pref):
                 self.registry.remove_agent(a)
         if cid:
+            log.info(f"Removing container '{cid}' for downstream '{name}'")
             subprocess.run(["docker", "rm", "-f", cid])
             return True
         return False

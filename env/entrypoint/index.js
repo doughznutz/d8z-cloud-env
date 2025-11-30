@@ -15,7 +15,8 @@ process.on('SIGINT', () => {
 function callRouter(request) {
     return new Promise((resolve, reject) => {
         if (DEBUG_MODE) {
-            console.log(`\n[DEBUG] Calling router with request: ${JSON.stringify(request)}`);
+            console.log(`
+[DEBUG] Calling router with request: ${JSON.stringify(request)}`);
         }
         
         const client = new net.Socket();
@@ -57,29 +58,22 @@ function callRouter(request) {
 }
 
 // --- Setup Sequences ---
-async function connectDownstreamServer() {
-    console.log('Connecting downstream MCP server to the router...');
-    const cmd = ['/opt/venv_mcp/bin/python3', '/app/mcp/entrypoint/server.py', '--stdio'];
-    if (DEBUG_MODE) {
-        cmd.push('--debug');
-    }
+async function main() {
     try {
-        const result = await callRouter({
-            type: 'run_tool',
-            name: 'ROUTER_connect_local_server',
-            args: {
-                name: 'env',
-                cmd: cmd
-            }
-        });
-        if (result.ok) {
-            console.log('✅ Downstream server connected successfully.');
-        } else {
-            throw new Error(result.error || 'Failed to connect downstream server.');
-        }
+        console.log('--- Welcome to the d8z-cloud-env Container! ---');
+        // The router must be started externally. This client connects to it.
+        // The downstream server connection is no longer needed as tools are directly loaded by the main router.
+        
+        await sequenceUserSetup();
+        await sequencePrerequisiteChecks();
+        const projectName = await resolveProjectContext();
+        await sequenceIdeSelection(projectName);
+
+        await showMainMenu();
+
     } catch (error) {
-        console.error(`❌ Critical error connecting downstream server: ${error.message}`);
-        console.error('The application cannot continue. Please check the router and server logs.');
+        console.error(`
+A critical error occurred during the setup process: ${error.message}`);
         process.exit(1);
     }
 }
@@ -124,7 +118,7 @@ async function sequencePrerequisiteChecks() {
     console.log('\n--- Running Prerequisite Checks ---');
     // Note: 'check_projects_root_directory' was implicitly handled by the new server logic, so it was removed.
     for (const check of ['check_docker_socket']) {
-        const result = await callRouter({ type: 'run_tool', name: `ENV_${check}` });
+        const result = await callRouter({ type: 'run_tool', name: `DOCKER_${check}` });
         if (result.status !== 'success') {
             console.error(`❌ Prerequisite check failed: ${result.message}`);
             console.log('Exiting. Please fix the issue and restart the container.');
@@ -138,7 +132,7 @@ async function sequenceInteractiveProjectSetup() {
     console.log('Starting interactive project setup...');
     let projectList = [];
     try {
-        const projToolResult = await callRouter({ type: 'run_tool', name: 'ENV_get_projects' });
+        const projToolResult = await callRouter({ type: 'run_tool', name: 'PROJECT_get_projects' });
         projectList = projToolResult.projects || [];
     } catch (error) {
         console.error('Could not list projects:', error.message);
@@ -147,7 +141,7 @@ async function sequenceInteractiveProjectSetup() {
     let projectName;
     const createNewProject = async () => {
         const { p } = await inquirer.prompt({ type: 'input', name: 'p', message: 'Enter a name for your new project:' });
-        await callRouter({ type: 'run_tool', name: 'ENV_create_project_directory', args: { project_name: p } });
+        await callRouter({ type: 'run_tool', name: 'PROJECT_create_project_directory', args: { project_name: p } });
         return p;
     };
 
@@ -180,7 +174,7 @@ async function resolveProjectContext() {
     const projectName = envState.PROJECT;
 
     if (projectName) {
-        const projToolResult = await callRouter({ type: 'run_tool', name: 'ENV_get_projects' });
+        const projToolResult = await callRouter({ type: 'run_tool', name: 'PROJECT_get_projects' });
         if (projToolResult.projects && projToolResult.projects.includes(projectName)) {
             console.log(`✅ Project '${projectName}' is set and directory exists.`);
             return projectName;
@@ -201,32 +195,13 @@ async function sequenceIdeSelection(projectName) {
     });
 
     console.log(`Launching '${ide}' for project '${projectName}'...`);
-    const result = await callRouter({ type: 'run_tool', name: 'ENV_launch_ide', args: { ide_name: ide } });
+    const result = await callRouter({ type: 'run_tool', name: 'DOCKER_launch_ide', args: { ide_name: ide } });
 
     if (result.status === 'success') {
         console.log(`✅ ${result.message}`);
     } else {
         console.error(`❌ Failed to launch IDE: ${result.message}`);
         console.error(result.error);
-    }
-}
-
-// --- Main Execution ---
-async function main() {
-    try {
-        console.log('--- Welcome to the d8z-cloud-env Container! ---');
-        // The router must be started externally. This client connects to it.
-        await connectDownstreamServer();
-        await sequenceUserSetup();
-        await sequencePrerequisiteChecks();
-        const projectName = await resolveProjectContext();
-        await sequenceIdeSelection(projectName);
-
-        await showMainMenu();
-
-    } catch (error) {
-        console.error(`\nA critical error occurred during the setup process: ${error.message}`);
-        process.exit(1);
     }
 }
 
@@ -321,12 +296,16 @@ async function showExplorerMenu() {
         if (!selectedItem) continue;
 
         if (itemType === 'agent') {
-            console.log(`\n--- Description for ${selectedDisplayName} ---\n${selectedItem.description}`);
+            console.log(`
+--- Description for ${selectedDisplayName} ---
+${selectedItem.description}`);
         } else if (itemType === 'resource') {
             try {
                 const response = await callRouter({ type: 'access_resource', name: selectedItem.name });
                 // Displaying state for any potential future resources
-                console.log(`\n--- State of ${selectedDisplayName} ---\n`, response.state);
+                console.log(`
+--- State of ${selectedDisplayName} ---
+`, response.state);
             } catch (error) {
                 console.error(`Error fetching state for '${selectedDisplayName}':`, error.message);
             }
@@ -337,7 +316,9 @@ async function showExplorerMenu() {
 }
 
 async function runTool(tool) {
-    console.log(`\n--- Running Tool: ${tool.name} ---\n${tool.description}`);
+    console.log(`
+--- Running Tool: ${tool.name} ---
+${tool.description}`);
 
     const params = {};
     if (tool.parameters) {
