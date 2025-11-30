@@ -1,10 +1,13 @@
 # core/tcp_client.py
 # Connect to a remote MCP server over TCP socket using simple JSON per-line frames.
+import logging
 import socket
 import json
 import threading
 from typing import Dict, Any, Optional
 from .registry import MCPRegistry
+
+log = logging.getLogger(__name__)
 
 class TCPMCPClient:
     def __init__(self, name: str, host: str, port: int, registry: MCPRegistry, prefix: str):
@@ -17,11 +20,13 @@ class TCPMCPClient:
         self._lock = threading.RLock()
 
     def connect(self, timeout=5.0):
+        log.info(f"Connecting to TCP client '{self.name}' at {self.host}:{self.port}")
         s = socket.create_connection((self.host, self.port), timeout=timeout)
         self.sock = s
         # do handshake
         resp = self.call({"type":"list_all"})
         if resp:
+            log.info(f"Registering capabilities from '{self.name}'")
             for t in resp.get("tools", []):
                 name = f"{self.prefix}{t['name']}"
                 from .registry import Tool
@@ -54,6 +59,8 @@ class TCPMCPClient:
                     return run
                 agent_obj = Agent(name=name, description=a.get("description",""), run_fn=make_run(a["name"]))
                 self.registry.register_agent(name, agent_obj)
+        else:
+            log.warning(f"Failed to get capabilities from TCP client '{self.name}'")
         return True
 
     def call(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -76,10 +83,11 @@ class TCPMCPClient:
                         return json.loads(line.decode("utf-8"))
                 return None
             except Exception as e:
-                print("tcp call error:", e)
+                log.error("tcp call error:", exc_info=e)
                 return None
 
     def close(self):
+        log.info(f"Closing TCP client '{self.name}'")
         try:
             if self.sock:
                 self.sock.close()

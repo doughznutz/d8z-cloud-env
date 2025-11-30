@@ -1,11 +1,14 @@
 # core/stdio_client.py
 # Connect to a local python MCP server launched as a subprocess using stdio JSON messages.
+import logging
 import subprocess
 import threading
 import json
 import time
 from typing import Dict, Any, Optional, Callable
 from .registry import MCPRegistry
+
+log = logging.getLogger(__name__)
 
 class StdioMCPClient:
     def __init__(self, name: str, cmd: list, registry: MCPRegistry, prefix: str):
@@ -22,6 +25,7 @@ class StdioMCPClient:
         self._alive = False
 
     def start(self):
+        log.info(f"Starting stdio client '{self.name}' with command: {' '.join(self.cmd)}")
         self.proc = subprocess.Popen(
             self.cmd,
             stdin=subprocess.PIPE,
@@ -40,7 +44,10 @@ class StdioMCPClient:
         # ask the server to list tools/resources/agents
         res = self.call({"type": "list_all"})
         if not res:
+            log.warning(f"Failed to get capabilities from stdio client '{self.name}'")
             return
+        
+        log.info(f"Registering capabilities from '{self.name}'")
         # expects res like: {"tools": [{"name":"summarize"}], "resources":[...], "agents":[...]}
         for t in res.get("tools", []):
             name = f"{self.prefix}{t['name']}"
@@ -94,7 +101,7 @@ class StdioMCPClient:
                 return None
             return json.loads(line.decode("utf-8"))
         except Exception as e:
-            print("stdio call error:", e)
+            log.error("stdio call error:", exc_info=e)
             return None
 
     def _read_loop(self):
@@ -108,11 +115,12 @@ class StdioMCPClient:
                     time.sleep(0.1)
                     continue
                 if err:
-                    print(f"[{self.name} stderr] {err.decode('utf-8').rstrip()}")
+                    log.info(f"[{self.name} stderr] {err.decode('utf-8').rstrip()}")
             except Exception:
                 break
 
     def stop(self):
+        log.info(f"Stopping stdio client '{self.name}'")
         self._alive = False
         if self.proc:
             try:

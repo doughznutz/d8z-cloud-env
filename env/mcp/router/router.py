@@ -1,42 +1,33 @@
 # router.py
 import argparse
 import time
-from core.registry import MCPRegistry
-from core.downstream_manager import DownstreamManager
+import logging
 from core.mcp_server import MCPServer
-from core.config_tools import make_router_tools
+from core.logger import setup_logging
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=3456)
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode for verbose logging.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode (sets log level to DEBUG).")
+    parser.add_argument("--log-level", default="INFO", help="Set the log level (e.g., DEBUG, INFO, WARNING).")
+    parser.add_argument("--log-file", help="Path to a file to write logs to.")
     args = parser.parse_args()
 
-    if args.debug:
-        print("DEBUG mode enabled for MCP Router.")
+    # Configure logging
+    setup_logging(debug=args.debug, log_level=args.log_level, log_file=args.log_file)
 
-    registry = MCPRegistry()
-    downstream = DownstreamManager(registry=registry)
-
-    # Register router management tools into registry
-    router_tools = make_router_tools(registry, downstream)
-    for tname, tool in router_tools.items():
-        registry.register_tool(tname, tool)
-
-    # Start router's MCP server endpoint
-    server = MCPServer(registry=registry, host=args.host, port=args.port)
+    # MCPServer now handles registry, downstream manager, and tool loading
+    server = MCPServer(host=args.host, port=args.port)
     server.start()
-
-    print("Router running. Management tools:")
-    for n in registry.list_tools():
-        print(" -", n)
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("shutting down.")
+        logging.info("Shutting down.")
 
 if __name__ == "__main__":
     main()
+
+
