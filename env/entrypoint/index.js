@@ -67,7 +67,7 @@ async function main() {
         await sequenceUserSetup();
         await sequencePrerequisiteChecks();
         const projectName = await resolveProjectContext();
-        await sequenceIdeSelection(projectName);
+        await sequenceModeSelection(projectName);
 
         await showMainMenu();
 
@@ -179,20 +179,94 @@ async function resolveProjectContext() {
             console.log(`✅ Project '${projectName}' is set and directory exists.`);
             return projectName;
         }
-        console.log(`⚠️ Project is set to '${projectName}', but directory not found. Starting interactive setup...`);
+        
+        console.log(`⚠️ Project is set to '${projectName}', but its directory was not found.`);
+        const { copySelf } = await inquirer.prompt({
+            type: 'confirm',
+            name: 'copySelf',
+            message: `Do you want to create this project by copying the contents of this container?`,
+            default: false,
+        });
+
+        if (copySelf) {
+            console.log(`Copying from /self to project '${projectName}'...`);
+            const result = await callRouter({ type: 'run_tool', name: 'PROJECT_copy_self_to_project', args: { project_name: projectName } });
+            if (result.status === 'success') {
+                console.log(`✅ ${result.message}`);
+                return projectName;
+            } else {
+                console.error(`❌ Failed to copy project: ${result.message}`);
+                console.log('Proceeding to interactive setup...');
+            }
+        } else {
+            console.log('Starting interactive setup...');
+        }
     }
     
     return await sequenceInteractiveProjectSetup();
 }
 
+async function sequenceModeSelection(projectName) {
+    console.log('\n--- Select Your Work Mode ---');
+    const { mode } = await inquirer.prompt({
+        type: 'list', name: 'mode', message: 'Are you working on development or deployment?',
+        choices: ['Development', 'Deployment'],
+    });
+
+    if (mode === 'Development') {
+        console.log('Proceeding to IDE selection...');
+        await sequenceIdeSelection(projectName);
+    } else if (mode === 'Deployment') {
+        console.log('\n--- Select a Deployment Service ---');
+        const serviceChoices = ['cloud', 'docker', 'github'];
+        const { service } = await inquirer.prompt({
+            type: 'list', name: 'service', message: 'Which service would you like to launch?',
+            choices: serviceChoices,
+        });
+
+        try {
+            console.log(`Launching '${service}' service...`);
+            const launchResult = await callRouter({ type: 'run_tool', name: 'DOCKER_launch_service', args: { service_name: service } });
+
+            if (launchResult.status !== 'success') {
+                console.error(`❌ Failed to launch service: ${launchResult.message}`);
+                if (launchResult.error) console.error(launchResult.error);
+                return; // Stop if launch fails
+            }
+            console.log(`✅ ${launchResult.message}`);
+
+            console.log(`Connecting '${service}' service to the MCP router...`);
+            const connectResult = await callRouter({ type: 'run_tool', name: 'ROUTER_connect_service', args: { service_name: service } });
+
+            if (connectResult.status !== 'success') {
+                console.error(`❌ Failed to connect service: ${connectResult.message}`);
+                if (connectResult.error) console.error(connectResult.error);
+                return; // Stop if connect fails
+            }
+            console.log(`✅ ${connectResult.message}`);
+            console.log('The tool registry has been updated. You can now access new tools in the MCP Server Explorer.');
+
+        } catch (error) {
+            // Errors from callRouter are already logged, so we just need to stop the sequence.
+        } finally {
+            console.log('Proceeding to main menu...');
+        }
+    }
+}
+
 async function sequenceIdeSelection(projectName) {
     console.log('\n--- Select Your IDE ---');
-    const ideChoices = ['terminal', 'vnc', 'vscode', 'codeserver'];
+    const ideChoices = ['none', 'vnc', 'vscode', 'codeserver'];
     ideChoices.sort();
     const { ide } = await inquirer.prompt({
         type: 'list', name: 'ide', message: 'Which IDE would you like to use?',
         choices: ideChoices,
     });
+
+    if (ide === 'none') {
+        console.log('Skipping IDE launch.');
+        return;
+    }
 
     console.log(`Launching '${ide}' for project '${projectName}'...`);
     const result = await callRouter({ type: 'run_tool', name: 'DOCKER_launch_ide', args: { ide_name: ide } });
