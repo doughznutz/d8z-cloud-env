@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 from pathlib import Path
 
 from core.registry import MCPRegistry, Tool
@@ -59,6 +60,35 @@ def make_tools(registry: MCPRegistry, downstream: DownstreamManager):
         description=create_project_directory.__doc__.strip(),
         parameters=[{"name": "project_name", "type": "str", "required": True}],
         run_fn=create_project_directory
+    )
+
+    def copy_self_to_project(args):
+        """Copies the running container's /self directory to a new project directory."""
+        project_name = args.get("project_name")
+        user = os.getenv('USER')
+        if not user:
+            raise ValueError("USER environment variable must be set to create a project directory.")
+        if not project_name:
+            raise ValueError("Missing 'project_name'.")
+
+        source_dir = '/self'
+        destination_dir = get_projects_root(user) / project_name
+
+        if not os.path.isdir(source_dir):
+            return {"status": "error", "message": f"Source directory '{source_dir}' not found."}
+
+        try:
+            shutil.copytree(source_dir, destination_dir, dirs_exist_ok=True)
+            return {"status": "success", "message": f"Project '{project_name}' created by copying from '/self'."}
+        except Exception as e:
+            log.error(f"Error copying from /self to {destination_dir}: {e}")
+            return {"status": "error", "message": f"Failed to copy project: {e}"}
+
+    tools["PROJECT_copy_self_to_project"] = Tool(
+        name="PROJECT_copy_self_to_project",
+        description=copy_self_to_project.__doc__.strip(),
+        parameters=[{"name": "project_name", "type": "str", "required": True}],
+        run_fn=copy_self_to_project
     )
 
     return tools

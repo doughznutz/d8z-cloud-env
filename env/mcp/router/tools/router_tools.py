@@ -61,4 +61,26 @@ def make_tools(registry: MCPRegistry, downstream: DownstreamManager):
         run_fn=disconnect_tool
     )
 
+    def connect_service_tool(args):
+        """Connects the router to a running Docker Compose service by its name."""
+        service_name = args.get("service_name")
+        if not service_name:
+            return {"status": "error", "message": "Missing required argument: service_name"}
+
+        try:
+            log.info(f"Attempting to connect to MCP interface for service '{service_name}' at {service_name}:3456...")
+            downstream.connect_service(name=service_name, host=service_name, port=3456)
+            log.info(f"Successfully connected to service '{service_name}'.")
+            return {"status": "success", "message": f"Successfully connected to service '{service_name}'."}
+        except Exception as e:
+            log.error(f"Error connecting to service '{service_name}': {e}", exc_info=True)
+            return {"status": "error", "message": f"Failed to connect to service '{service_name}'.", "error": str(e)}
+
+    tools["ROUTER_connect_service"] = Tool(
+        name="ROUTER_connect_service",
+        description=connect_service_tool.__doc__.strip(),
+        parameters=[{"name": "service_name", "type": "str", "required": True}],
+        run_fn=connect_service_tool
+    )
+
     return tools

@@ -53,6 +53,19 @@ class DownstreamManager:
             return True
         return False
 
+    def connect_service(self, name: str, host: str, port: int):
+        """Connects to a pre-existing service via TCP."""
+        log.info(f"Connecting to existing service '{name}' at {host}:{port}")
+        if name in self._tcp_clients:
+            log.warning(f"Service '{name}' is already connected.")
+            return self._tcp_clients[name]
+
+        prefix = f"{name.upper()}_"
+        client = TCPMCPClient(name=name, host=host, port=port, registry=self.registry, prefix=prefix)
+        client.connect()
+        self._tcp_clients[name] = client
+        return client
+
     def connect_remote_docker(self, name: str, image: str, extra_args: Optional[list] = None):
         """
         Launch docker container mapping a free host port (hostport) to container:3456,
