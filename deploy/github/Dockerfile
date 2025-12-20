@@ -19,4 +19,4 @@ RUN find /self -name *.sh -exec dos2unix {} +
 RUN find /self -name *.sh -exec chmod +x {} +
 
 # Set the entrypoint
-ENTRYPOINT ["/self/env/github/entrypoint.sh"]
+ENTRYPOINT ["/self/deploy/github/entrypoint.sh"]

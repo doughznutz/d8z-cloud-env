@@ -3,7 +3,7 @@ set -e
 
 # Source the function scripts
 # The WORKDIR is /self, so we use an absolute path.
-source /self/env/cloud/functions.sh
+source /self/deploy/cloud/functions.sh
 
 # Main command dispatcher
 COMMAND=$1

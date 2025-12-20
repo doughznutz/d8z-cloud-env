@@ -6,15 +6,20 @@ This project contains the development environment for Doughznutz LLC. It utilize
 
 ## Installation
 
-[Provide instructions on how to install and set up your project.  This would include any Docker setup, etc.]
+docker pull  doughznutz/doughznutz:d8z-cloud-env
 
 ## Usage
 
-[Provide instructions on how to use your project.  Describe how to run the development environment, etc.]
+docker run \
+    -it --rm \
+    --env-file <(env) \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /home/$USER/projects:/home/$USER/projects \
+    doughznutz/doughznutz:d8z-cloud-env 
 
 ## Contributing
 
-[Instructions for contributing to the project.]
+Email me: doughznutz@gmail.com
 
 ## License
 

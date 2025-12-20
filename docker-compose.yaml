@@ -21,11 +21,11 @@ services:
 
   # Cloud container
   cloud:
-    image: env:cloud
+    image: deploy:cloud
     container_name: cloud
     build:
       context: .
-      dockerfile: ./env/cloud/Dockerfile
+      dockerfile: ./deploy/cloud/Dockerfile
     env_file: ./.env
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/creds.json
@@ -40,11 +40,11 @@ services:
 
   # Docker-in-Docker container
   docker:
-    image: env:docker
+    image: deploy:docker
     container_name: docker
     build:
       context: .
-      dockerfile: ./env/docker/Dockerfile
+      dockerfile: ./deploy/docker/Dockerfile
     env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
@@ -54,11 +54,11 @@ services:
 
   # Github container
   github:
-    image: env:github
+    image: deploy:github
     container_name: github
     build:
       context: .  # We check in the entire environment, so need visibility to .
-      dockerfile: ./env/github/Dockerfile
+      dockerfile: ./deploy/github/Dockerfile
     env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
