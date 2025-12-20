@@ -5,11 +5,6 @@ RUN apt-get update \
     && apt-get install -y curl dos2unix emacs jq make \
     && apt-get clean
 
-# Install Git - Do we want GH?
-RUN apt-get update \
-    && apt-get install -y git \
-    && apt-get clean
-
 # Install Python
 RUN apt-get update \
     && apt-get install -y python3 python3-pip python3-venv \
@@ -20,7 +15,7 @@ RUN apt-get update \
     && apt-get install -y nodejs npm \
     && apt-get clean
 
-# Install Docker tools
+# Install Docker tools.
 RUN apt-get update \
     && apt-get install -y docker.io \
     && apt-get clean
@@ -30,6 +25,11 @@ RUN mkdir -p /usr/libexec/docker/cli-plugins
 ADD https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 \
           /usr/libexec/docker/cli-plugins/docker-compose
 RUN chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+# Install Git - Do we want GH or use the github container?
+# RUN apt-get update \
+#    && apt-get install -y git \
+#    && apt-get clean
 
 # Clean up unnecessary packages
 RUN apt-get autoremove -y && apt-get clean

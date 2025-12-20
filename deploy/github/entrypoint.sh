@@ -11,7 +11,7 @@ GITHUB_API="https://api.github.com"
 AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
 
 # Source the functions
-. /self/env/github/functions.sh
+. /self/deploy/github/functions.sh
 
 # Prevent .env from being committed
 echo ".env" >> .gitignore

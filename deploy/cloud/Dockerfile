@@ -42,5 +42,5 @@ RUN find /self -name *.sh -exec dos2unix {} +
 RUN find /self -name *.sh -exec chmod +x {} +
 
 # Set the entrypoint
-ENTRYPOINT ["/self/env/cloud/entrypoint.sh"]
+ENTRYPOINT ["/self/deploy/cloud/entrypoint.sh"]
 CMD ["mcp-server"]
