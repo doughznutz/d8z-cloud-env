@@ -1,3 +1,4 @@
+# Move this to the cloud container endpoint to serve the config.
 name: D8Z GCP MCP server
 version: 0.0.1
 schema: v1

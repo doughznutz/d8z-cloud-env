@@ -1,4 +1,4 @@
-curl http://ollama:11434/v1/chat/completions \
+curl http://og:11434/v1/chat/completions \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{
@@ -13,7 +13,7 @@ curl http://ollama:11434/v1/chat/completions \
     "stream": false
   }'
 
-curl http://ollama:11434/v1/chat/completions \
+curl http://og:11434/v1/chat/completions \
   -X POST \
   -H "Content-Type: application/json" \
   -d '{

@@ -90,24 +90,6 @@ services:
       - internal_net
       - external_net
 
-# Voideditor container - VNC enabled editor with built in AI Agent
-  voideditor:
-    image: dev:voideditor
-    container_name: voideditor
-    build:
-      context: ./dev/voideditor
-      args:
-        USERNAME: ${USER}
-        PASSWORD: ${DOCKER_PASSWORD:-none}
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    privileged: true
-    shm_size: "2g"
-    networks:
-      - internal_net  # Access via dashboard
-
 # VNC editor - Now with Gemini CLI
   vnc:
     image: dev:vnc
@@ -166,13 +148,17 @@ services:
       - internal_net
       - external_net  # The code-server has issues with the dashboard redirect.
 
-# Ollama AI gateway service - No VNC, so pass in the keys here.
-  ollama:
-    image: dev:ollama
-    container_name: ollama
+# Ollama Gatewai service
+  ollama-gatewai:
+    image: dev:og
+    container_name: og
     build:
-      context: ./dev/ollama
+      context: ./dev/og
+      args:
+        - PROJECT=ollama-gatewai
     env_file: ./.env
+    volumes:
+      - /home/doughznutz/OGJournal:/app/logs
     networks:
       internal_net:
       external_net: {}
@@ -185,44 +171,6 @@ services:
     volumes:
       - /home/doughznutz/OtelJournal:/var/lib/otel
     env_file: ./.env
-    networks:
-      - internal_net
-
-# Gemini CLI container
-  gemini:
-    image: dev:gemini
-    container_name: gemini
-    build:
-      context: ./dev/gemini
-      args:
-        USERNAME: ${USER}
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    networks:
-      - internal_net
-      - external_net
-
-# Database and DB admin.
-  adminer:
-    image: adminer
-    ports:
-      - 8082:8080
-    networks:
-      - internal_net
-      - external_net
-
-  ollamadb:
-    image: dev:ollamadb
-    container_name: ollamadb
-    build: 
-      context: ./dev/ollamadb
-    env_file: ./.env
-    environment:
-      - POSTGRES_DB=ollama_logs
-    volumes:
-      - /home/doughznutz/OllamaJournal:/var/lib/postgresql/data
     networks:
       - internal_net
 

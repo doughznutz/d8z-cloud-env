@@ -34,16 +34,16 @@ RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
 RUN apt-get install -y nodejs
 
 # Install Gemini CLI globally
-RUN npm view @google/gemini-cli version > /tmp/gemini-cli-version \
-    && npm install -g @google/gemini-cli
+RUN npm install -g @google/gemini-cli && \
+    npm view @google/gemini-cli version > /tmp/gemini-cli-version 
 
 # Install Claude CLI globally #
-RUN npm view claude version > /tmp/claude-version \
-    && npm install -g claude
+RUN npm install -g claude && \
+    npm view claude version > /tmp/claude-version
 
 # Install Continue CLI globally 
-RUN npm view  @continuedev/cli version > /tmp/continue-version \
-    && npm install -g @continuedev/cli
+RUN npm install -g @continuedev/cli && \
+    npm view  @continuedev/cli version > /tmp/continue-version
 
 # Add a non-root User.
 ARG USERNAME

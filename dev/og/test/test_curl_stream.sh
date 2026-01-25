@@ -1,4 +1,4 @@
-curl http://localhost:11434/api/chat \
+curl http://og:11434/api/chat \
   -X POST \
   -H "Content-Type: application/json" \
   -N \
@@ -12,4 +12,4 @@ curl http://localhost:11434/api/chat \
     ],
     "temperature": 0.7,
     "stream": true
-  }'
+  }'

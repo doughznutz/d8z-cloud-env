@@ -4,35 +4,23 @@
 SERVICES += dashboard dozzle
 dashboard_RUN_DEPS := dozzle
 
-# Gemini CLI with telemetry sends logs to otel-collector
-SERVICES += gemini otel-collector
-gemini_RUN_DEPS := otel-collector
-
-# Ollama (openai-API) gateway to all them LLMS, along with a database to store the request/response pairs.
-SERVICES += ollama
-ollama_RUN_DEPS := ollamadb
-
-# Database containers
-# To be removed and replaced with MCP.
-SERVICES += adminer ollamadb 
-adminer_RUN_DEPS := dashboard ollamadb
-
-# This VNC container has emacs, defines the USER/PASSWORD
-# Used as a base image for the other editors.
-SERVICES += vnc
-vnc_RUN_DEPS := dashboard
+# VNC container has emacs, defines the USER/PASSWORD
+# Ollama Gatewai (openai-API) proxy to all them LLMS
+# Otel Collector is required for GeminiCLI logging
+SERVICES += vnc ollama-gatewai otel-collector
+vnc_RUN_DEPS := dashboard ollama-gatewai otel-collector
 
 # VS codeserver (web) using Continue plug-in Agent.
 SERVICES += codeserver
 codeserver_BUILD_DEPS := vnc
-codeserver_RUN_DEPS := dashboard ollama otel-collector
+codeserver_RUN_DEPS := $(vnc_RUN_DEPS)
 
 # Both vscode (vnc) and code-server (web) using Continue plug-in Agent.
-# Removed from build as unneeded. 20251025
 SERVICES += vscode
 vscode_BUILD_DEPS := vnc
-vscode_RUN_DEPS := dashboard ollama otel-collector
+vscode_RUN_DEPS := $(vnc_RUN_DEPS)
 
+include deploy/cloud/cloud.mk
 include deploy/github/github.mk
 include deploy/docker/dockerhub.mk
 

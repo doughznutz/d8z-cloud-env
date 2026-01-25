@@ -54,6 +54,7 @@ EXPOSE 8080
 
 # The Continue.continue setup
 COPY ./continue/ /home/$USERNAME/.continue/
+COPY ./continue.conf /etc/supervisor/conf.d/continue.conf
 
 # Entrypoint for the container
 USER root

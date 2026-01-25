@@ -21,7 +21,7 @@ type ChatRequest struct {
 }
 
 func main() {
-	url := "http://localhost:11434/api/chat"
+	url := "http://og:11434/api/chat"
 
 	reqBody := ChatRequest{
 		Model: "gpt-3.5-turbo",
@@ -67,4 +67,4 @@ func main() {
 		}
 		fmt.Println(string(body))
 	}
-}
+}
