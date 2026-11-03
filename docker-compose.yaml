@@ -2,26 +2,97 @@
 # in the cloud quickly.  It utilizes simple containers that can run in a container optimized
 # OS.  Included is a sample development environment with VNC, VScode and VoidEditor with
 # AI Agents enabled via API_KEYS routed through a local ollama proxy server.
+#
+# Profiles pick who launches the system:
+#   docker compose up                  - just dood, which builds/starts the rest
+#                                        over the host docker socket. Needs
+#                                        COMPOSE_PROFILES=dood in .env (compose
+#                                        has no in-file default profile).
+#   docker compose --profile local up  - the dev services directly, no dood.
+#   docker compose --profile dind up   - dood without the host socket, driving
+#                                        its own dind sidecar daemon; only the
+#                                        console (8080) and MCP gateway (8766)
+#                                        are published back to the host.
+#   docker compose --profile deploy up - cloud/docker/github deployment tools.
+# dood starts profiled services by naming them (make up-<svc>), which works
+# regardless of which profiles are active.
+
+x-dood: &dood-base
+  image: d8z-cloud-env
+  build:
+    context: .
+    dockerfile: ./dood/Dockerfile
+  stdin_open: true # Keep stdin open for interactive sessions
+  tty: true        # Allocate a TTY for a proper shell experience
+  env_file: ./.env
 
 services:
-  env:
-    image: d8z-cloud-env
+  # DOOD - docker-out-of-docker entrypoint: terminal CLI + Streamlit dashboard
+  # + MCP gateway, all fronting the same MCP router/registry. Replaces the
+  # old `env` service (deprecated/removed) - same container identity so
+  # anything that referenced "d8z-cloud-env" keeps working.
+  dood:
+    <<: *dood-base
     container_name: d8z-cloud-env
-    build:
-      context: .
-      dockerfile: ./env/Dockerfile
-    stdin_open: true # Keep stdin open for interactive sessions
-    tty: true        # Allocate a TTY for a proper shell experience
-    env_file: ./.env
+    profiles: [dood]
+    ports:
+      - "8766:8766"   # MCP gateway - published directly, bypasses Traefik/basic-auth on purpose
     volumes:
       - /home/$USER/projects:/home/$USER/projects
       - /var/run/docker.sock:/var/run/docker.sock # For DinD
+    networks:
+      internal_net:
+      external_net: {}
+
+  # DOOD against a private docker daemon (the dind sidecar) instead of the
+  # host socket. Shares dind's network namespace, so Traefik inside dind
+  # reaches this dashboard via host.docker.internal (DOOD_HOST) and dind
+  # publishes the ports for both.
+  dood-dind:
+    <<: *dood-base
+    container_name: d8z-cloud-env-dind
+    profiles: [dind]
+    environment:
+      - DOCKER_HOST=unix:///var/run/dind/docker.sock
+      - DOOD_HOST=host.docker.internal
+    network_mode: service:dind
+    volumes:
+      - /home/$USER/projects:/home/$USER/projects
+      - dind-sock:/var/run/dind
+    depends_on:
+      dind:
+        condition: service_healthy
+
+  # Docker daemon sidecar for dood-dind. Everything dood launches lives in
+  # here; bind mounts resolve against this container, hence the projects
+  # mount. The default socket stays for the services that mount
+  # /var/run/docker.sock (dozzle, deightz); the second is shared with dood.
+  dind:
+    image: docker:27-dind
+    container_name: dind
+    profiles: [dind]
+    privileged: true
+    command: ["--host=unix:///var/run/docker.sock", "--host=unix:///var/run/dind/docker.sock"]
+    environment:
+      - DOCKER_TLS_CERT_DIR=   # no TLS/tcp listener; sockets only
+    ports:
+      - "8080:8080"   # console - Traefik inside dind publishes 8080 here
+      - "8766:8766"   # dood-dind MCP gateway (shares this netns)
+    volumes:
+      - /home/$USER/projects:/home/$USER/projects
+      - dind-sock:/var/run/dind
+      - dind-data:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 2s
+      retries: 30
     networks:
       - external_net
 
   # Cloud container
   cloud:
     image: deploy:cloud
+    profiles: [deploy]
     container_name: cloud
     build:
       context: .
@@ -41,6 +112,7 @@ services:
   # Docker-in-Docker container
   docker:
     image: deploy:docker
+    profiles: [deploy]
     container_name: docker
     build:
       context: .
@@ -55,6 +127,7 @@ services:
   # Github container
   github:
     image: deploy:github
+    profiles: [deploy]
     container_name: github
     build:
       context: .  # We check in the entire environment, so need visibility to .
@@ -66,79 +139,55 @@ services:
       - external_net
 
 # Development environment containers.
-  # Dashboard is the front-end server at http://localhost or http://cloudhost
-  dashboard:
-    image: dev:dashboard
-    container_name: dashboard
+
+  # Traefik is the front door: terminates :80, applies basic auth, serves the
+  # console shell at `/` (sidebar + iframe, dood as the default canvas) and
+  # routes /dood /deightz /og /dozzle per dev/traefik/dynamic.yml.
+  traefik:
+    image: dev:traefik
+    profiles: [local]
+    container_name: traefik
     build:
-      context: ./dev/dashboard
+      context: ./dev/traefik
+    environment:
+      - TRAEFIK_USER=${USER}
+      - TRAEFIK_PASSWORD=${DOCKER_PASSWORD}
+      - DOOD_HOST=${DOOD_HOST:-dood}   # where the /dood route points; see dood-dind
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "80:80"     # http://localhost
+      - "8080:80"   # http://localhost:8080 (port 80 itself is reserved elsewhere on this host for now)
     networks:
       internal_net:
-      external_net: {}
+      external_net: {}   # internal_net alone is `internal: true` and silently drops the port publish
 
   # A Docker Log watcher.
   dozzle:
     image: amir20/dozzle
+    profiles: [local]
     container_name: dozzle
-    ports:
-      - "8083:8080"
+    environment:
+      - DOZZLE_BASE=/dozzle
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - internal_net
       - external_net
 
-# VNC editor - Now with Gemini CLI
-  vnc:
-    image: dev:vnc
-    container_name: vnc
+# Deightz - streamlined IDE: linuxserver/code-server + claude/codex/gemini/continue CLIs, no VNC desktop.
+  deightz:
+    image: dev:deightz
+    profiles: [local]
+    container_name: deightz
     build:
-      context: ./dev/vnc
-      args:
-        USERNAME: ${USER}
-        PASSWORD: ${DOCKER_PASSWORD:-none}
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    networks:
-      - internal_net  # Go through the dasboard.
-      - external_net
-
-# VSCode container - VNC enabled editor with Continue AI Agent
-  vscode:
-    image: dev:vscode
-    container_name: vscode
-    build:
-      context: ./dev/ide
-      args:
-        IDE_TYPE: vscode
-        USERNAME: ${USER}
-        PASSWORD: ${DOCKER_PASSWORD}
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    privileged: true
-    networks:
-      - internal_net   # Go through the dasboard
-
-
-# VS Code-server - Web based editor with Continue AI Agent
-  codeserver:
-    image: dev:codeserver
-    container_name: codeserver
-    build:
-      context: ./dev/ide
-      args:
-        IDE_TYPE: codeserver
-        USERNAME: ${USER}
-        PASSWORD: ${DOCKER_PASSWORD}
-    ports:
-    #  - 8081:8080  # Access: http://localhost:8080
-      - 443:8080  # Use this port in the cloud for now.
+      context: ./dev/deightz
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - PASSWORD=${CODE_SERVER_PASSWORD}
+      - SUDO_PASSWORD=${DOCKER_PASSWORD}
+      - DEFAULT_WORKSPACE=/home/${USER}/projects/${PROJECT}
     env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
@@ -146,19 +195,18 @@ services:
     privileged: true
     networks:
       - internal_net
-      - external_net  # The code-server has issues with the dashboard redirect.
+      - external_net
 
-# Ollama Gatewai service
+# Ollama Gateway - local Ollama runtime + Streamlit dashboard (chat + model management)
   ollama-gatewai:
     image: dev:og
+    profiles: [local]
     container_name: og
     build:
       context: ./dev/og
-      args:
-        - PROJECT=ollama-gatewai
     env_file: ./.env
     volumes:
-      - /home/doughznutz/OGJournal:/app/logs
+      - og-ollama-data:/root/.ollama
     networks:
       internal_net:
       external_net: {}
@@ -166,6 +214,7 @@ services:
 # OpenTelemetry Collector
   otel-collector:
     image: dev:otel-collector
+    profiles: [local]
     container_name: otel-collector
     build: ./dev/otel-collector
     volumes:
@@ -177,6 +226,13 @@ services:
 networks:
   internal_net:
     internal: true
+    name: internal_net
   external_net:
     driver: bridge
+    name: external_net
+
+volumes:
+  og-ollama-data:
+  dind-sock:
+  dind-data:
 
