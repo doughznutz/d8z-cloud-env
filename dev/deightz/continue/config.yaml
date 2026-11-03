@@ -1,0 +1,23 @@
+# Points Continue (extension + `cn` CLI) at the local models served by the
+# og gateway (ollama-gatewai service), reachable at http://og:11434.
+name: D8Z Ollama Gateway
+version: 0.0.1
+schema: v1
+models:
+  - name: llama3.2:3b
+    provider: ollama
+    model: llama3.2:3b
+    apiBase: http://og:11434
+    roles:
+      - chat
+      - edit
+      - apply
+  - name: qwen2.5-coder:1.5b
+    provider: ollama
+    model: qwen2.5-coder:1.5b
+    apiBase: http://og:11434
+    roles:
+      - chat
+      - edit
+      - apply
+      - autocomplete

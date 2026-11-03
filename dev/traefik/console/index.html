@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D8Z Console</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1d2027; --muted: #6b7280;
+    --border: #e2e4e9; --hover: #eef0f4; --accent: #2f6fde; --accent-bg: #e6eefc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --panel: #171a21; --text: #e6e8ec; --muted: #8b93a3;
+      --border: #262a33; --hover: #1f232c; --accent: #6ea0ff; --accent-bg: #1c2740;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  nav {
+    width: 200px; flex: none; display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--border);
+    transition: width .15s;
+  }
+  nav header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 14px 10px; font-weight: 700; letter-spacing: .04em;
+  }
+  #toggle {
+    border: 0; background: none; color: var(--muted); cursor: pointer;
+    font-size: 16px; padding: 2px 6px; border-radius: 4px;
+  }
+  #toggle:hover { background: var(--hover); color: var(--text); }
+  nav ul { list-style: none; margin: 0; padding: 4px 8px; }
+  nav li a {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border-radius: 6px; color: var(--text); text-decoration: none;
+  }
+  nav li a:hover { background: var(--hover); }
+  nav li a.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  nav li a .ico { width: 18px; text-align: center; flex: none; }
+  nav li a small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+  nav footer { margin-top: auto; padding: 10px 14px; font-size: 12px; }
+  nav footer a { color: var(--muted); }
+  nav.collapsed { width: 52px; }
+  nav.collapsed .label, nav.collapsed header .title, nav.collapsed footer { display: none; }
+  nav.collapsed header { justify-content: center; }
+  main { flex: 1; min-width: 0; }
+  iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+</style>
+</head>
+<body>
+<nav id="nav">
+  <header><span class="title">D8Z</span><button id="toggle" title="Collapse sidebar">&#9776;</button></header>
+  <ul id="links"></ul>
+  <footer><a id="popout" href="/dood/" target="_blank" rel="noopener">Open in new tab &#8599;</a></footer>
+</nav>
+<main><iframe id="canvas" title="Console canvas"></iframe></main>
+<script>
+  // Sub-pages are all served by Traefik on this same origin (see dynamic.yml).
+  const PAGES = [
+    { id: "dood",    path: "/dood/",    ico: "⌂", name: "DOOD",    desc: "Control plane" },
+    { id: "deightz", path: "/deightz/", ico: "⌨", name: "Deightz", desc: "Code-server IDE" },
+    { id: "og",      path: "/og/",      ico: "✱", name: "OG",      desc: "Ollama gateway" },
+    { id: "dozzle",  path: "/dozzle/",  ico: "≡", name: "Dozzle",  desc: "Container logs" },
+  ];
+  const nav = document.getElementById("nav");
+  const links = document.getElementById("links");
+  const canvas = document.getElementById("canvas");
+  const popout = document.getElementById("popout");
+
+  for (const p of PAGES) {
+    const li = document.createElement("li");
+    li.innerHTML = `<a href="#${p.id}" data-id="${p.id}" title="${p.name}">
+      <span class="ico">${p.ico}</span><span class="label">${p.name}<small>${p.desc}</small></span></a>`;
+    links.appendChild(li);
+  }
+
+  function show() {
+    const page = PAGES.find(p => "#" + p.id === location.hash) || PAGES[0];
+    if (canvas.dataset.id !== page.id) {
+      canvas.src = page.path;
+      canvas.dataset.id = page.id;
+    }
+    popout.href = page.path;
+    document.title = `D8Z Console · ${page.name}`;
+    for (const a of links.querySelectorAll("a")) a.classList.toggle("active", a.dataset.id === page.id);
+  }
+  window.addEventListener("hashchange", show);
+  show();
+
+  try { if (localStorage.getItem("d8z-nav-collapsed") === "1") nav.classList.add("collapsed"); } catch (e) {}
+  document.getElementById("toggle").addEventListener("click", () => {
+    const collapsed = nav.classList.toggle("collapsed");
+    try { localStorage.setItem("d8z-nav-collapsed", collapsed ? "1" : "0"); } catch (e) {}
+  });
+</script>
+</body>
+</html>
