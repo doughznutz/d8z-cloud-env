@@ -16,7 +16,7 @@ streamlit run /app/app.py \
   --server.port 8501 \
   --server.address 0.0.0.0 \
   --server.headless true \
-  --server.baseUrlPath og &
+  --server.baseUrlPath "${OG_BASE_PATH:-og}" &
 STREAMLIT_PID=$!
 
 trap 'kill -TERM "$OLLAMA_PID" "$STREAMLIT_PID" 2>/dev/null' TERM INT

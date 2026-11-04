@@ -1,0 +1,111 @@
+# A gateway bundle: one isolated copy of the dev services fronted by its own
+# Traefik, spawned by a parent gateway's gw-server as compose project
+# `d8zgw-<id>`:
+#
+#   docker compose -p d8zgw-<id> --env-file /self/.env \
+#     -f bundle/compose.yaml -f <generated override> --profile ... up -d
+#
+# Services `extend` the root docker-compose.yaml so definitions never drift;
+# fixed container names and the global network names are reset, so every
+# network here is project-scoped. The only thing a bundle shares with its
+# parent is `gwlink`, which holds the parent's Traefik and this bundle's
+# entry: its Traefik (host bundle) or its dind sidecar (dind bundle).
+#
+# Profiles pick the mix (traefik always runs):
+#   deightz, og, otel, gopher, dozzle - no dependencies, but one dozzle per docker
+#   daemon: a dind bundle always gets one, a host bundle never does (it
+#   shares, and links to, the dozzle of the daemon it runs on)
+#
+# A dind bundle is two-stage, both stages using this file:
+#   1. on the parent's daemon: only `dind` (profile dind), on gwlink
+#   2. inside that dind: the bundle itself, Traefik publishing 8080 on the
+#      sidecar, so the parent routes to <sidecar>:8080 over gwlink.
+# Inside, the bundle is an ordinary host bundle: dozzle etc. see the sidecar's
+# daemon, which holds the whole bundle and its own children.
+#
+# Everything restarts unless-stopped: a service that dies early (e.g. before
+# the bundle's dind is up) recovers by itself, and bundles come back after a
+# daemon restart (gw-server re-attaches their routes).
+#
+# The generated override (gw-server renderOverride) supplies identity,
+# prefixes, labels, and DOCKER_HOST for dind mode.
+
+services:
+  traefik:
+    extends: { file: ../../../docker-compose.yaml, service: traefik }
+    container_name: !reset null
+    restart: unless-stopped
+    ports: !reset []
+    profiles: !reset []
+    extra_hosts: !reset []
+    networks: !override
+      internal_net: {}
+      gwlink: {}
+
+  dozzle:
+    extends: { file: ../../../docker-compose.yaml, service: dozzle }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [dozzle]
+    networks: !override [internal_net]
+
+  deightz:
+    extends: { file: ../../../docker-compose.yaml, service: deightz }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [deightz]
+    networks: !override [internal_net, external_net]
+
+  ollama-gatewai:
+    extends: { file: ../../../docker-compose.yaml, service: ollama-gatewai }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [og]
+    networks: !override
+      internal_net:
+        aliases: [og]   # base.yml routes to http://og:8501
+      external_net: {}
+
+  otel-collector:
+    extends: { file: ../../../docker-compose.yaml, service: otel-collector }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [otel]
+    networks: !override [internal_net]
+
+  gopher:
+    extends: { file: ../../../docker-compose.yaml, service: gopher }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [gopher]
+    networks: !override [internal_net, external_net]
+
+  # The dind sidecar (stage 1 of a dind bundle). Its API is on tcp:2375
+  # without TLS: reachable only on gwlink (parent Traefik + this) and the
+  # bundle's own egress network (nothing else on it).
+  dind:
+    extends: { file: ../../../docker-compose.yaml, service: dind }
+    container_name: !reset null
+    restart: unless-stopped
+    ports: !reset []
+    profiles: !override [dind]
+    command: !override ["--host=unix:///var/run/docker.sock", "--host=tcp://0.0.0.0:2375", "--tls=false"]
+    volumes: !override
+      # Bind mounts inside this daemon resolve against the sidecar's FS.
+      - /home/${USER}/projects:/home/${USER}/projects
+      - dind-data:/var/lib/docker
+    networks: !override [gwlink, external_net]
+
+networks:
+  internal_net:
+    internal: true
+  external_net:
+    driver: bridge
+  # Parent-Traefik <-> this Traefik. gw-server attaches the parent to it.
+  gwlink:
+    internal: true
+
+volumes:
+  og-ollama-data:
+  gopher-data:
+  dind-data:

@@ -1,0 +1,8 @@
+# Secrets - never commit (gw-server's push_branch excludes these too).
+.env
+.env.*
+!.env.example
+
+# Local build outputs
+__pycache__/
+*.pyc
