@@ -23,10 +23,8 @@ RUN mkdir -p /usr/local/gcloud \
 # Add gcloud to the PATH
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 
-# Install Python libraries for the MCP server and GCP clients
+# Install Python libraries for the GCP client SDKs
 RUN pip3 install --no-cache-dir --break-system-packages \
-    fastapi \
-    uvicorn[standard] \
     google-cloud-run \
     google-cloud-compute \
     google-cloud-storage \
@@ -43,4 +41,3 @@ RUN find /self -name *.sh -exec chmod +x {} +
 
 # Set the entrypoint
 ENTRYPOINT ["/self/deploy/cloud/entrypoint.sh"]
-CMD ["mcp-server"]

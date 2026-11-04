@@ -22,9 +22,6 @@ if [ -z "$COMMAND" ]; then
     echo "  list-projects          - List accessible GCP projects"
     echo "  describe-project <id>  - Describe a GCP project"
     echo "  set-project <id>       - Set the active GCP project"
-    echo ""
-    echo "MCP Server:"
-    echo "  mcp-server             - Start the MCP HTTP server"
     exit 1
 fi
 
@@ -57,11 +54,6 @@ case "$COMMAND" in
         ;;
     set-project)
         set_project "$@"
-        ;;
-
-    # MCP Server
-    mcp-server)
-        uvicorn env.cloud.mcp_server:app --host 0.0.0.0 --port 8080
         ;;
 
     *)

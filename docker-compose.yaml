@@ -4,69 +4,53 @@
 # AI Agents enabled via API_KEYS routed through a local ollama proxy server.
 #
 # Profiles pick who launches the system:
-#   docker compose up                  - just dood, which builds/starts the rest
-#                                        over the host docker socket. Needs
-#                                        COMPOSE_PROFILES=dood in .env (compose
-#                                        has no in-file default profile).
-#   docker compose --profile local up  - the dev services directly, no dood.
-#   docker compose --profile dind up   - dood without the host socket, driving
-#                                        its own dind sidecar daemon; only the
-#                                        console (8080) and MCP gateway (8766)
-#                                        are published back to the host.
-#   docker compose --profile deploy up - cloud/docker/github deployment tools.
-# dood starts profiled services by naming them (make up-<svc>), which works
-# regardless of which profiles are active.
-
-x-dood: &dood-base
-  image: d8z-cloud-env
-  build:
-    context: .
-    dockerfile: ./dood/Dockerfile
-  stdin_open: true # Keep stdin open for interactive sessions
-  tty: true        # Allocate a TTY for a proper shell experience
-  env_file: ./.env
+#   docker compose up                  - traefik (+dozzle), unconditionally -
+#                                        the entry point. Project/container/
+#                                        subcluster management lives in its
+#                                        gw-server console from here on.
+#   docker compose --profile local up  - also starts the rest of the dev
+#                                        services directly (deightz, the
+#                                        ollama gateway, otel, gopher)
+#                                        without using the console's
+#                                        container management.
+#
+# GitHub and Docker Hub actions run natively inside gw-server (its
+# Deployment page). Only GCP still uses a tool container: `cloud`, below,
+# run one-shot per job (`compose run`), never started with `up`.
+#
+# dood (the old terminal CLI/dashboard/MCP control plane) and its dind
+# sidecar pairing are gone - gw-server replaced them. The `dind` service
+# below stays: a spawned gateway's own isolated bundle (dev/traefik/bundle)
+# extends its image/environment/healthcheck to run its own dind sidecar;
+# nothing starts this root-level copy directly any more.
 
 services:
-  # DOOD - docker-out-of-docker entrypoint: terminal CLI + Streamlit dashboard
-  # + MCP gateway, all fronting the same MCP router/registry. Replaces the
-  # old `env` service (deprecated/removed) - same container identity so
-  # anything that referenced "d8z-cloud-env" keeps working.
-  dood:
-    <<: *dood-base
-    container_name: d8z-cloud-env
-    profiles: [dood]
-    ports:
-      - "8766:8766"   # MCP gateway - published directly, bypasses Traefik/basic-auth on purpose
-    volumes:
-      - /home/$USER/projects:/home/$USER/projects
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    networks:
-      internal_net:
-      external_net: {}
-
-  # DOOD against a private docker daemon (the dind sidecar) instead of the
-  # host socket. Shares dind's network namespace, so Traefik inside dind
-  # reaches this dashboard via host.docker.internal (DOOD_HOST) and dind
-  # publishes the ports for both.
-  dood-dind:
-    <<: *dood-base
-    container_name: d8z-cloud-env-dind
-    profiles: [dind]
+  # GCP tool container: gcloud SDK + deploy/cloud's shell commands. gw-server
+  # runs it one-shot per GCP job (`compose --profile deploy run --rm cloud
+  # <cmd>`); nothing keeps it running.
+  cloud:
+    image: deploy:cloud
+    profiles: [deploy]
+    build:
+      context: .
+      dockerfile: ./deploy/cloud/Dockerfile
+    env_file: ./.env
     environment:
-      - DOCKER_HOST=unix:///var/run/dind/docker.sock
-      - DOOD_HOST=host.docker.internal
-    network_mode: service:dind
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/creds.json
     volumes:
-      - /home/$USER/projects:/home/$USER/projects
-      - dind-sock:/var/run/dind
-    depends_on:
-      dind:
-        condition: service_healthy
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
+      # Needs GOOGLE_APPLICATION_CREDENTIALS_PATH in .env, pointing at a real
+      # GCP service-account key file on the host - gw-server's cloud jobs
+      # fail check_vars without it. The /dev/null default keeps the file
+      # parseable when it's unset.
+      - ${GOOGLE_APPLICATION_CREDENTIALS_PATH:-/dev/null}:/app/creds.json:ro
+    networks:
+      - external_net
 
-  # Docker daemon sidecar for dood-dind. Everything dood launches lives in
-  # here; bind mounts resolve against this container, hence the projects
-  # mount. The default socket stays for the services that mount
-  # /var/run/docker.sock (dozzle, deightz); the second is shared with dood.
+  # Pure extends-template for a gateway bundle's own dind sidecar
+  # (dev/traefik/bundle/compose.yaml) - only image/environment/healthcheck
+  # are actually inherited; everything else is overridden per bundle. Kept
+  # in its own `dind` profile so it's never started directly.
   dind:
     image: docker:27-dind
     container_name: dind
@@ -74,10 +58,7 @@ services:
     privileged: true
     command: ["--host=unix:///var/run/docker.sock", "--host=unix:///var/run/dind/docker.sock"]
     environment:
-      - DOCKER_TLS_CERT_DIR=   # no TLS/tcp listener; sockets only
-    ports:
-      - "8080:8080"   # console - Traefik inside dind publishes 8080 here
-      - "8766:8766"   # dood-dind MCP gateway (shares this netns)
+      - DOCKER_TLS_CERTDIR=    # no TLS (and no auto tcp:2376 listener); sockets only
     volumes:
       - /home/$USER/projects:/home/$USER/projects
       - dind-sock:/var/run/dind
@@ -89,70 +70,35 @@ services:
     networks:
       - external_net
 
-  # Cloud container
-  cloud:
-    image: deploy:cloud
-    profiles: [deploy]
-    container_name: cloud
-    build:
-      context: .
-      dockerfile: ./deploy/cloud/Dockerfile
-    env_file: ./.env
-    environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/creds.json
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-    # - ${GOOGLE_APPLICATION_CREDENTIALS_PATH}:/app/creds.json:ro
-    ports:
-      - "8085:8080"
-    networks:
-      internal_net:
-      external_net: {}
-
-  # Docker-in-Docker container
-  docker:
-    image: deploy:docker
-    profiles: [deploy]
-    container_name: docker
-    build:
-      context: .
-      dockerfile: ./deploy/docker/Dockerfile
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    networks:
-      - external_net
-
-  # Github container
-  github:
-    image: deploy:github
-    profiles: [deploy]
-    container_name: github
-    build:
-      context: .  # We check in the entire environment, so need visibility to .
-      dockerfile: ./deploy/github/Dockerfile
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-    networks:
-      - external_net
-
 # Development environment containers.
 
-  # Traefik is the front door: terminates :80, applies basic auth, serves the
-  # console shell at `/` (sidebar + iframe, dood as the default canvas) and
-  # routes /dood /deightz /og /dozzle per dev/traefik/dynamic.yml.
+  # Traefik is the front door (root gateway): terminates :80, applies basic
+  # auth, serves the React console at `/` (sidebar + iframes) and routes
+  # /deightz /og /dozzle per dev/traefik/dynamic/base.yml. Its
+  # gw-server is the cluster's one control plane: it spawns/stops child
+  # gateway bundles (dev/traefik/bundle) mounted at /gw/<name>/ - the
+  # cascade - on the daemon it runs on (the host's, or a dind sidecar for an
+  # isolated child); manages this project's own local services
+  # (deightz, the ollama gateway, otel, gopher); runs the Deployment jobs
+  # (GitHub/Docker Hub natively, GCP via `cloud`); and provisions
+  # + starts sibling projects under projects/ (self-template or git clone).
+  # Context is the repo root: the image carries the repo in /self to build
+  # and start bundles from, and to seed new self-template projects.
   traefik:
     image: dev:traefik
-    profiles: [local]
     container_name: traefik
     build:
-      context: ./dev/traefik
+      context: .
+      dockerfile: ./dev/traefik/Dockerfile
+    env_file: ./.env   # passed on to child bundles (regenerated as /self/.env)
     environment:
       - TRAEFIK_USER=${USER}
       - TRAEFIK_PASSWORD=${DOCKER_PASSWORD}
-      - DOOD_HOST=${DOOD_HOST:-dood}   # where the /dood route points; see dood-dind
+      - GW_ROLE=root
+      - GW_PROJECTS_ROOT=/home/${USER}/projects
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/$USER/projects:/home/$USER/projects
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -164,7 +110,6 @@ services:
   # A Docker Log watcher.
   dozzle:
     image: amir20/dozzle
-    profiles: [local]
     container_name: dozzle
     environment:
       - DOZZLE_BASE=/dozzle
@@ -223,6 +168,22 @@ services:
     networks:
       - internal_net
 
+# Gopher - test runner: a Streamlit dashboard to enumerate this cluster's
+# containers, define HTTP/TCP checks against them, and run/track results.
+  gopher:
+    image: dev:gopher
+    profiles: [local]
+    container_name: gopher
+    build:
+      context: ./dev/gopher
+    env_file: ./.env
+    volumes:
+      - gopher-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      internal_net:
+      external_net: {}
+
 networks:
   internal_net:
     internal: true
@@ -233,6 +194,7 @@ networks:
 
 volumes:
   og-ollama-data:
+  gopher-data:
   dind-sock:
   dind-data:
 
