@@ -1,0 +1,85 @@
+{{- /*
+  Base routes for one gateway in the cascade. Rendered by Traefik's file
+  provider (Go templates + sprig), so a single file serves every level:
+    GW_ROLE=root   - outermost gateway, basic auth on everything
+    GW_ROLE=child  - spawned bundle on an internal network, no auth
+  GW_PREFIX is this gateway's external mount point ("" for root,
+  "/gw/abc", "/gw/abc/gw/xyz", ...). Parents forward the full path unchanged,
+  so every app below is mounted under the full prefix and can generate
+  absolute links (dozzle/streamlit base paths are set to match).
+  gw-server writes one gw-<name>.yml next to this file per running child.
+*/ -}}
+{{- $p := env "GW_PREFIX" }}
+{{- $root := eq (env "GW_ROLE" | default "root") "root" }}
+http:
+  middlewares:
+    gw-guard:
+{{- if $root }}
+      basicAuth:
+        usersFile: /etc/traefik/users
+{{- else }}
+      # Auth happens once, at the root; this just tags hops for debugging.
+      headers:
+        customRequestHeaders:
+          X-D8Z-Gateway: '{{ env "GW_ID" }}'
+{{- end }}
+    # Sub-apps use relative asset URLs, so `/deightz` must become `/deightz/`.
+    add-trailing-slash:
+      redirectRegex:
+        regex: '^(https?://[^/]+{{ $p }}/(deightz|og|dozzle|gopher|gw/[a-z0-9]+))$'
+        replacement: "${1}/"
+        permanent: true
+    deightz-strip:
+      stripPrefix:
+        prefixes:
+          - '{{ $p }}/deightz'
+
+  routers:
+    # Console + its API, both served by gw-server.
+    console:
+      rule: 'Path(`{{ $p }}/`) || Path(`{{ $p }}/index.html`) || PathPrefix(`{{ $p }}/assets/`) || PathPrefix(`{{ $p }}/api/`)'
+      entryPoints: [web]
+      middlewares: [gw-guard]
+      service: console
+    deightz:
+      rule: 'Path(`{{ $p }}/deightz`) || PathPrefix(`{{ $p }}/deightz/`)'
+      entryPoints: [web]
+      middlewares: [gw-guard, add-trailing-slash, deightz-strip]
+      service: deightz
+    og:
+      rule: 'Path(`{{ $p }}/og`) || PathPrefix(`{{ $p }}/og/`)'
+      entryPoints: [web]
+      middlewares: [gw-guard, add-trailing-slash]
+      service: og
+    dozzle:
+      rule: 'Path(`{{ $p }}/dozzle`) || PathPrefix(`{{ $p }}/dozzle/`)'
+      entryPoints: [web]
+      middlewares: [gw-guard, add-trailing-slash]
+      service: dozzle
+    gopher:
+      rule: 'Path(`{{ $p }}/gopher`) || PathPrefix(`{{ $p }}/gopher/`)'
+      entryPoints: [web]
+      middlewares: [gw-guard, add-trailing-slash]
+      service: gopher
+
+  services:
+    console:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8000"
+    deightz:
+      loadBalancer:
+        servers:
+          - url: "http://deightz:8443"
+    og:
+      loadBalancer:
+        servers:
+          - url: "http://og:8501"
+    dozzle:
+      loadBalancer:
+        servers:
+          - url: "http://dozzle:8080"
+    gopher:
+      loadBalancer:
+        servers:
+          - url: "http://gopher:8502"
