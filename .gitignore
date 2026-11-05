@@ -8,4 +8,4 @@ __pycache__/
 *.pyc
 
 # gw-server binary from a local `go build`
-dev/traefik/server/gw
+dev/dood/server/gw

@@ -1,56 +1,179 @@
-# The d8z-cloud-environment is a set of Docker containers to get you up and running 
-# in the cloud quickly.  It utilizes simple containers that can run in a container optimized
-# OS.  Included is a sample development environment with VNC, VScode and VoidEditor with
-# AI Agents enabled via API_KEYS routed through a local ollama proxy server.
+# The d8z-cloud-environment: a dood gateway (Traefik + its gw-server console)
+# and a Deightz IDE, shipped as named images in one Docker Hub repository so
+# the same system runs locally or on a cloud VM.
 #
-# Profiles pick who launches the system:
-#   docker compose up                  - traefik (+dozzle), unconditionally -
-#                                        the entry point. Project/container/
-#                                        subcluster management lives in its
-#                                        gw-server console from here on.
-#   docker compose --profile local up  - also starts the rest of the dev
-#                                        services directly (deightz, the
-#                                        ollama gateway, otel, gopher)
-#                                        without using the console's
-#                                        container management.
+# Two kinds of service live here, kept strictly apart:
 #
-# GitHub and Docker Hub actions run natively inside gw-server (its
-# Deployment page). Only GCP still uses a tool container: `cloud`, below,
-# run one-shot per job (`compose run`), never started with `up`.
+#   *-dh services (profile `dh`) only BUILD the Docker Hub bound images.
+#   They're never started. Build them with
+#       docker compose --profile dh build
+#   and gw-server's Deployment page pushes them (see ~/.d8z/deployment.yaml):
+#       dood-dh -> ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:dood
+#       deightz-dh -> ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:d8z
 #
-# dood (the old terminal CLI/dashboard/MCP control plane) and its dind
-# sidecar pairing are gone - gw-server replaced them. The `dind` service
-# below stays: a spawned gateway's own isolated bundle (dev/traefik/bundle)
-# extends its image/environment/healthcheck to run its own dind sidecar;
-# nothing starts this root-level copy directly any more.
+#   Runtime services USE those images (no `build:`): pulled from Docker Hub,
+#   or the local copy a `dh` build just tagged. Profiles pick the system:
+#       docker compose --profile root up -d        - dood only
+#       docker compose --profile workspace up -d   - dood + deightz
+#   Set COMPOSE_PROFILES=root (or workspace) in .env to make it the default.
+#
+#   Optional services (og, gopher, dozzle) are started on demand from the
+#   console's Control tab in either configuration - each has its own profile
+#   so gw-server can start exactly one. They still build from source (the
+#   dood image carries the repo in /self, so that works in the cloud too).
+#
+# The `dind` service is only an extends-template for a spawned gateway
+# bundle's sidecar (dev/dood/bundle/compose.yaml); nothing starts it here.
 
 services:
-  # GCP tool container: gcloud SDK + dev/cloud's shell commands. gw-server
-  # runs it one-shot per GCP job (`compose --profile deploy run --rm cloud
-  # <cmd>`); nothing keeps it running.
-  cloud:
-    image: deploy:cloud
-    profiles: [deploy]
+  # ---------------------------------------------------------------------
+  # Docker Hub bound builds (profile dh) - build only, never `up`.
+  # ---------------------------------------------------------------------
+
+  # Context is the repo root: the image carries the repo in /self to start
+  # optional services and child bundles from, and to seed new projects.
+  dood-dh:
+    image: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:dood
+    profiles: [dh]
     build:
       context: .
-      dockerfile: ./dev/cloud/Dockerfile
-    env_file: ./.env
+      dockerfile: ./dev/dood/Dockerfile
+
+  # Deightz - streamlined IDE: linuxserver/code-server + claude/codex/gemini/
+  # continue CLIs. Published as the `d8z` container.
+  deightz-dh:
+    image: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:d8z
+    profiles: [dh]
+    build:
+      context: ./dev/deightz
+
+  # ---------------------------------------------------------------------
+  # Runtime: profiles root / workspace, from the Docker Hub images.
+  # ---------------------------------------------------------------------
+
+  # Dood is the front door (root gateway): Traefik + gw-server. Traefik
+  # terminates :80, applies basic auth, serves the React console at `/` and
+  # routes /deightz /og /dozzle /gopher per dev/dood/dynamic/base.yml. Its gw-server is the cluster's
+  # control plane: workspace gateways (child bundles), optional services,
+  # Docker Hub builds/pushes and cloud deployments (deployment.yaml).
+  dood:
+    image: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:dood
+    pull_policy: missing
+    profiles: [root, workspace]
+    container_name: dood
+    env_file: ./.env   # passed on to child bundles (regenerated as /self/.env)
     environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/creds.json
+      - DOUGHZNUTZ_USER=${USER}
+      - DOUGHZNUTZ_PASSWORD=${DOCKER_PASSWORD}
+      - GW_ROLE=root
+      # This gateway's NATS identity. "root" locally; a cloud deployment
+      # sets its target name so the local root can address it.
+      - GW_ID=${GW_ID:-root}
+      - GW_PROJECTS_ROOT=/home/${USER}/projects
+      # Leafnode auth: required when the leaf port is reachable from outside
+      # (a cloud gateway); blank keeps the local, internal-only behaviour.
+      - GW_NATS_LEAF_USER=${GW_NATS_LEAF_USER:-}
+      - GW_NATS_LEAF_PASSWORD=${GW_NATS_LEAF_PASSWORD:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/$USER/projects:/home/$USER/projects
+      # Gateway config, kept on the host OUTSIDE every repository so it
+      # survives any rebuild: workspace.yaml (GitHub tokens),
+      # deployment.yaml (Docker Hub / cloud keys) and .gw-master-key.
+      # Create it yourself first (mkdir -m 700 ~/.d8z) so it's yours, not
+      # root's. D8Z_CONFIG_DIR moves it elsewhere.
+      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}:/etc/d8z
+      # Embedded NATS JetStream store (dev/dood/server/nats.go). One
+      # volume per bundle - bundle/compose.yaml re-declares the same name.
+      - d8z-nats:/var/lib/d8zgw-nats
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "80:80"
+      # NATS leafnode listener. Loopback-only by default; a cloud gateway
+      # sets GW_NATS_PUBLISH=7422 so its parent can dial in (with auth).
+      - "${GW_NATS_PUBLISH:-127.0.0.1:7422}:7422"
+    networks:
+      internal_net:
+      external_net: {}   # internal_net alone is `internal: true` and silently drops the port publish
+
+  # Deightz IDE, mounting this .env's PROJECT. The console opens it at
+  # /deightz/.
+  deightz:
+    image: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:d8z
+    pull_policy: missing
+    profiles: [workspace]
+    container_name: deightz
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - PASSWORD=${CODE_SERVER_PASSWORD}
+      - SUDO_PASSWORD=${DOCKER_PASSWORD}
+      - DEFAULT_WORKSPACE=/home/${USER}/projects/${PROJECT}
+    env_file: ./.env
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      # Needs GOOGLE_APPLICATION_CREDENTIALS_PATH in .env, pointing at a real
-      # GCP service-account key file on the host - gw-server's cloud jobs
-      # fail check_vars without it. The /dev/null default keeps the file
-      # parseable when it's unset.
-      - ${GOOGLE_APPLICATION_CREDENTIALS_PATH:-/dev/null}:/app/creds.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock # For DinD
+    privileged: true
     networks:
+      - internal_net
       - external_net
 
-  # Pure extends-template for a gateway bundle's own dind sidecar
-  # (dev/traefik/bundle/compose.yaml) - only image/environment/healthcheck
-  # are actually inherited; everything else is overridden per bundle. Kept
-  # in its own `dind` profile so it's never started directly.
+  # ---------------------------------------------------------------------
+  # Optional services - started on demand from the console's Control tab.
+  # ---------------------------------------------------------------------
+
+  # A Docker log watcher.
+  dozzle:
+    image: amir20/dozzle
+    profiles: [dozzle]
+    container_name: dozzle
+    environment:
+      - DOZZLE_BASE=/dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - internal_net
+      - external_net
+
+  # Ollama Gateway - local Ollama runtime + Streamlit dashboard.
+  og:
+    image: dev:og
+    profiles: [og]
+    container_name: og
+    build:
+      context: ./dev/og
+    env_file: ./.env
+    volumes:
+      - og-ollama-data:/root/.ollama
+    networks:
+      internal_net:
+      external_net: {}
+
+  # Gopher - test runner: a Streamlit dashboard to enumerate this cluster's
+  # containers, define HTTP/TCP checks against them, and run/track results.
+  gopher:
+    image: dev:gopher
+    profiles: [gopher]
+    container_name: gopher
+    build:
+      context: ./dev/gopher
+    env_file: ./.env
+    volumes:
+      - gopher-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      internal_net:
+      external_net: {}
+
+  # ---------------------------------------------------------------------
+  # Templates - never started from this file.
+  # ---------------------------------------------------------------------
+
+  # Extends-template for a gateway bundle's own dind sidecar
+  # (dev/dood/bundle/compose.yaml) - only image/environment/healthcheck
+  # are actually inherited; everything else is overridden per bundle.
   dind:
     image: docker:27-dind
     container_name: dind
@@ -70,135 +193,6 @@ services:
     networks:
       - external_net
 
-# Development environment containers.
-
-  # Traefik is the front door (root gateway): terminates :80, applies basic
-  # auth, serves the React console at `/` (sidebar + iframes) and routes
-  # /deightz /og /dozzle per dev/traefik/dynamic/base.yml. Its
-  # gw-server is the cluster's one control plane: it spawns/stops child
-  # gateway bundles (dev/traefik/bundle) mounted at /gw/<name>/ - the
-  # cascade - on the daemon it runs on (the host's, or a dind sidecar for an
-  # isolated child); manages this project's own local services
-  # (deightz, the ollama gateway, otel, gopher); runs the Deployment jobs
-  # (GitHub/Docker Hub natively, GCP via `cloud`); and provisions
-  # + starts sibling projects under projects/ (self-template or git clone).
-  # Context is the repo root: the image carries the repo in /self to build
-  # and start bundles from, and to seed new self-template projects.
-  traefik:
-    image: dev:traefik
-    container_name: traefik
-    build:
-      context: .
-      dockerfile: ./dev/traefik/Dockerfile
-    env_file: ./.env   # passed on to child bundles (regenerated as /self/.env)
-    environment:
-      - TRAEFIK_USER=${USER}
-      - TRAEFIK_PASSWORD=${DOCKER_PASSWORD}
-      - GW_ROLE=root
-      - GW_PROJECTS_ROOT=/home/${USER}/projects
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /home/$USER/projects:/home/$USER/projects
-      # Workspace config: workspace.yaml (holds GitHub tokens) and
-      # .gw-master-key (derives each workspace gateway's key) - kept on the
-      # host, OUTSIDE every repository, so both survive any rebuild. Create
-      # the directory yourself first (mkdir -m 700 ~/.d8z) so it's yours, not
-      # root's; with no workspace.yaml in it the console starts from a
-      # default workspace (this .env's PROJECT) and writes the file on your
-      # first edit. D8Z_CONFIG_DIR moves it elsewhere. The root never mounts
-      # workspace content: each workspace gets its own child gateway that
-      # does (see dev/traefik/server/workspaces.go).
-      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}:/etc/d8z
-      # Embedded NATS JetStream store (dev/traefik/server/nats.go): keeps
-      # this gateway's own messages across container recreation, not just a
-      # process restart. One volume per bundle - bundle/compose.yaml
-      # re-declares the same name so a child gets its own, not this one.
-      - d8z-nats:/var/lib/d8zgw-nats
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "80:80"   # http://localhost:8080 (port 80 itself is reserved elsewhere on this host for now)
-    networks:
-      internal_net:
-      external_net: {}   # internal_net alone is `internal: true` and silently drops the port publish
-
-  # A Docker Log watcher.
-  dozzle:
-    image: amir20/dozzle
-    container_name: dozzle
-    environment:
-      - DOZZLE_BASE=/dozzle
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - internal_net
-      - external_net
-
-# Deightz - streamlined IDE: linuxserver/code-server + claude/codex/gemini/continue CLIs, no VNC desktop.
-  deightz:
-    image: dev:deightz
-    profiles: [local]
-    container_name: deightz
-    build:
-      context: ./dev/deightz
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Etc/UTC
-      - PASSWORD=${CODE_SERVER_PASSWORD}
-      - SUDO_PASSWORD=${DOCKER_PASSWORD}
-      - DEFAULT_WORKSPACE=/home/${USER}/projects/${PROJECT}
-    env_file: ./.env
-    volumes:
-      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT
-      - /var/run/docker.sock:/var/run/docker.sock # For DinD
-    privileged: true
-    networks:
-      - internal_net
-      - external_net
-
-# Ollama Gateway - local Ollama runtime + Streamlit dashboard (chat + model management)
-  ollama-gatewai:
-    image: dev:og
-    profiles: [local]
-    container_name: og
-    build:
-      context: ./dev/og
-    env_file: ./.env
-    volumes:
-      - og-ollama-data:/root/.ollama
-    networks:
-      internal_net:
-      external_net: {}
-
-# OpenTelemetry Collector
-  otel-collector:
-    image: dev:otel-collector
-    profiles: [local]
-    container_name: otel-collector
-    build: ./dev/otel-collector
-    volumes:
-      - /home/doughznutz/OtelJournal:/var/lib/otel
-    env_file: ./.env
-    networks:
-      - internal_net
-
-# Gopher - test runner: a Streamlit dashboard to enumerate this cluster's
-# containers, define HTTP/TCP checks against them, and run/track results.
-  gopher:
-    image: dev:gopher
-    profiles: [local]
-    container_name: gopher
-    build:
-      context: ./dev/gopher
-    env_file: ./.env
-    volumes:
-      - gopher-data:/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      internal_net:
-      external_net: {}
-
 networks:
   internal_net:
     internal: true
@@ -213,4 +207,3 @@ volumes:
   dind-sock:
   dind-data:
   d8z-nats:
-
