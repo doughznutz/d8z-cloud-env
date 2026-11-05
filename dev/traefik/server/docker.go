@@ -25,6 +25,7 @@ const (
 	labelProfiles   = "d8z.gw.profiles"
 	labelEntry      = "d8z.gw.entry"      // the container the parent routes to
 	labelSrcProject = "d8z.gw.srcproject" // sibling project the bundle was spawned from ("" = this repo)
+	labelWorkspace  = "d8z.gw.workspace"  // workspace the gateway serves ("" = none: a plain bundle)
 	labelProject    = "com.docker.compose.project"
 	labelService    = "com.docker.compose.service"
 )

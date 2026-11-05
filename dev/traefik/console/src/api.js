@@ -11,6 +11,9 @@ async function request(path, opts = {}) {
   return body;
 }
 
+const send = (method, path, body) =>
+  request(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
 export const api = {
   self: () => request("api/self"),
   gateways: () => request("api/gateways"),
@@ -34,17 +37,24 @@ export const api = {
       body: JSON.stringify({ project: project || "" }),
     }),
   stopLocal: (svc) => request(`api/services/${encodeURIComponent(svc)}/stop`, { method: "POST" }),
-  // Projects: sibling source trees under ~/projects.
-  projects: () => request("api/projects"),
-  createProject: (req) =>
-    request("api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-    }),
-  startProject: (name) => request(`api/projects/${encodeURIComponent(name)}/up`, { method: "POST" }),
-  stopProject: (name) => request(`api/projects/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  projectLog: (name) => request(`api/projects/${encodeURIComponent(name)}/log`),
+  // Workspaces: what gateways work on (workspace.yaml on a manager; the one
+  // assigned workspace on a workspace gateway).
+  workspaces: () => request("api/workspaces"),
+  addWorkspace: (ws) => send("POST", "api/workspaces", ws),
+  editWorkspace: (name, ws) => send("PUT", `api/workspaces/${encodeURIComponent(name)}`, ws),
+  removeWorkspace: (name, purge) =>
+    request(`api/workspaces/${encodeURIComponent(name)}${purge ? "?purge=true" : ""}`, { method: "DELETE" }),
+  // A workspace gateway's open work (uncommitted/unpushed), asked of it over NATS.
+  workspaceStatus: (name) => request(`api/gateways/${encodeURIComponent(name)}/workspace-status`),
+  startWorkspaceGateway: (name, opts) => send("POST", `api/workspaces/${encodeURIComponent(name)}/gateway`, opts || {}),
+  // NATS: a gateway's own inbox/send, reached at `base` - that gateway's
+  // own GW_PREFIX ("" for this one, or e.g. "/gw/abc" for another one in
+  // the cascade, exactly matching api.self()'s "prefix" / a Gateway's
+  // "prefix" field). Absolute, so it works for self, a direct child, a
+  // parent, or a sibling - anywhere ordinary Traefik routing reaches.
+  inbox: (base = "") => request(`${base}/api/nats/inbox`),
+  sendMessage: (base, text) => send("POST", `${base}/api/nats/send`, { text }),
+  gatewaysAt: (base) => request(`${base}/api/gateways`),
   // Jobs: one-shot actions against GitHub, Docker Hub, GCP. `project` is
   // the sidebar's selection ("" / "self" = this repo); `args` is by name.
   jobs: () => request("api/jobs"),

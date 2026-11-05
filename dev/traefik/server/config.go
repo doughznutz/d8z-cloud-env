@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -22,12 +23,26 @@ type Config struct {
 	StateDir        string   // generated per-child override files
 	StaticDir       string   // built Vite console
 	ProjectsRoot    string   // ~/projects on the host, bind-mounted in (root only)
+	WorkspaceFile   string   // workspace.yaml (manager gateways; holds tokens - mounted from outside any repo)
+	WorkspaceName   string   // set in a workspace gateway: the workspace it serves (details arrive over NATS)
+	WorkspaceKey    string   // its per-gateway key: unseals the assignment its parent sends
 	Listen          string
+	NatsLeafPort    int    // leafnode listener, reachable by our parent once it attaches to our gwlink
+	NatsStoreDir    string // JetStream store, backed by a named volume so it survives container recreation
 }
 
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func getenvInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return def
 }
@@ -46,7 +61,12 @@ func loadConfig() Config {
 		StateDir:        getenv("GW_STATE_DIR", "/var/lib/d8zgw"),
 		StaticDir:       getenv("GW_STATIC_DIR", "/srv/console"),
 		ProjectsRoot:    os.Getenv("GW_PROJECTS_ROOT"),
+		WorkspaceFile:   getenv("GW_WORKSPACE_FILE", "/etc/d8z/workspace.yaml"),
+		WorkspaceName:   os.Getenv("GW_WORKSPACE_NAME"),
+		WorkspaceKey:    os.Getenv("GW_WORKSPACE_KEY"),
 		Listen:          getenv("GW_LISTEN", "127.0.0.1:8000"),
+		NatsLeafPort:    getenvInt("GW_NATS_LEAF_PORT", 7422),
+		NatsStoreDir:    getenv("GW_NATS_STORE_DIR", "/var/lib/d8zgw-nats"),
 	}
 	for _, s := range strings.Split(getenv("GW_SERVICES", "deightz,og,gopher,dozzle"), ",") {
 		if s = strings.TrimSpace(s); s != "" {

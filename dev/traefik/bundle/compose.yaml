@@ -28,7 +28,10 @@
 # daemon restart (gw-server re-attaches their routes).
 #
 # The generated override (gw-server renderOverride) supplies identity,
-# prefixes, labels, and DOCKER_HOST for dind mode.
+# prefixes, labels, and DOCKER_HOST for dind mode - and, for a workspace
+# gateway, its workspace: traefik (gw-server, the repository manager) and
+# deightz then mount that one workspace read/write instead of the projects
+# root, and a dind sidecar mounts only it.
 
 services:
   traefik:
@@ -38,9 +41,20 @@ services:
     ports: !reset []
     profiles: !reset []
     extra_hosts: !reset []
+    # Not the root's mounts: a child never sees the root's workspace.yaml
+    # (and tokens) - a manager child gets its own, project-scoped; a
+    # workspace gateway's override replaces even that with its workspace.
+    volumes: !override
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/${USER}/projects:/home/${USER}/projects
+      - d8z-config:/etc/d8z
+      - d8z-nats:/var/lib/d8zgw-nats
     networks: !override
       internal_net: {}
       gwlink: {}
+      # Egress for gw-server's own outbound work: a workspace gateway's
+      # git pull/push and GitHub API calls. Nothing is published on it.
+      external_net: {}
 
   dozzle:
     extends: { file: ../../../docker-compose.yaml, service: dozzle }
@@ -109,3 +123,10 @@ volumes:
   og-ollama-data:
   gopher-data:
   dind-data:
+  # A manager child's own workspace.yaml (project-scoped: never the root's).
+  # A workspace gateway doesn't get one - its override replaces the
+  # traefik's mounts with just its workspace.
+  d8z-config:
+  # This bundle's own JetStream store - see docker-compose.yaml's traefik
+  # service.
+  d8z-nats:

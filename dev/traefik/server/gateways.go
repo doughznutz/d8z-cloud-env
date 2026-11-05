@@ -38,13 +38,15 @@ type Gateway struct {
 	Services   []ServiceStatus `json:"services"`
 	Container  string          `json:"container,omitempty"`
 	SrcProject string          `json:"srcProject,omitempty"` // sibling project it was spawned from ("" = this repo)
+	Workspace  string          `json:"workspace,omitempty"`  // workspace it serves
 }
 
 type SpawnRequest struct {
-	Name     string   `json:"name"`
-	Profiles []string `json:"profiles"`
-	Docker   string   `json:"docker"`  // host | dind: the child's own mode
-	Project  string   `json:"project"` // sibling project to spawn from instead of this repo; "" = this repo
+	Name      string   `json:"name"`
+	Profiles  []string `json:"profiles"`
+	Docker    string   `json:"docker"`    // host | dind: the child's own mode
+	Project   string   `json:"project"`   // sibling project to spawn from instead of this repo; "" = this repo
+	Workspace string   `json:"workspace"` // workspace (from workspace.yaml) this gateway serves; "" = none
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
@@ -70,11 +72,20 @@ type Manager struct {
 	recMu    sync.Mutex
 	ready    sync.Map // name -> upstream it was last seen ready at
 	selfProj atomic.Value
+	ws       *wsStore
+	assign   atomic.Pointer[wsAssignment] // a workspace gateway's assignment, once its parent has sent it
+	nats     *NatsHub
 }
 
 func NewManager(cfg Config) *Manager {
 	self, _ := os.Hostname()
-	return &Manager{cfg: cfg, self: self, ops: map[string]*op{}, projOps: map[string]*op{}}
+	m := &Manager{cfg: cfg, self: self, ops: map[string]*op{}, projOps: map[string]*op{}, ws: &wsStore{file: cfg.WorkspaceFile}}
+	hub, err := startNatsHub(cfg)
+	if err != nil {
+		log.Printf("nats: %v", err)
+	}
+	m.nats = hub
+	return m
 }
 
 func (m *Manager) childID(name string) string {
@@ -134,7 +145,7 @@ func (m *Manager) List(ctx context.Context) ([]Gateway, error) {
 		g := &Gateway{
 			Name: l[labelName], ID: l[labelID], Project: l[labelProject], Prefix: l[labelPrefix],
 			Docker: l[labelDocker], State: c.State.Status, Container: c.name(),
-			SrcProject: l[labelSrcProject],
+			SrcProject: l[labelSrcProject], Workspace: l[labelWorkspace],
 		}
 		if l[labelProfiles] != "" {
 			g.Profiles = strings.Split(l[labelProfiles], ",")
@@ -152,7 +163,8 @@ func (m *Manager) List(ctx context.Context) ([]Gateway, error) {
 				continue
 			}
 			g = &Gateway{Name: name, ID: m.childID(name), Project: m.project(name), Prefix: m.prefix(name),
-				Docker: o.Req.Docker, Profiles: resolveProfiles(o.Req.Profiles, o.Req.Docker), SrcProject: o.Req.Project}
+				Docker: o.Req.Docker, Profiles: resolveProfiles(o.Req.Profiles, o.Req.Docker), SrcProject: o.Req.Project,
+				Workspace: o.Req.Workspace}
 			byName[name] = g
 		}
 		switch o.State {
@@ -241,6 +253,14 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) error {
 	}
 	if _, err := m.bundleFile(req.Project); err != nil {
 		return err
+	}
+	if req.Workspace != "" {
+		if err := m.managerOnly(); err != nil {
+			return err
+		}
+		if _, err := m.ws.get(req.Workspace); err != nil {
+			return err
+		}
 	}
 	cs, err := childGateways(ctx, m.cfg.ID)
 	if err != nil {
@@ -332,9 +352,16 @@ func (m *Manager) spawn(ctx context.Context, req SpawnRequest, o *op) error {
 	if req.Project != "" {
 		projectEnv = []string{"PROJECT=" + req.Project}
 	}
+	ws, err := m.spawnWorkspace(ctx, o, req)
+	if err != nil {
+		return err
+	}
+	if ws != nil {
+		projectEnv = []string{"PROJECT=" + wsMountName(ws.Workspace)}
+	}
 
 	if req.Docker != "dind" {
-		ovr, err := write(".override.yaml", m.renderOverride(req, profs, labels, false))
+		ovr, err := write(".override.yaml", m.renderOverride(req, profs, labels, false, ws))
 		if err != nil {
 			return err
 		}
@@ -342,8 +369,10 @@ func (m *Manager) spawn(ctx context.Context, req SpawnRequest, o *op) error {
 		return upWithRetryEnv(ctx, o.Log, "", projectEnv, append(compose(ovr, profs...), "up", "-d"))
 	}
 
-	// 1. The sidecar, on our daemon.
-	side, err := write(".sidecar.yaml", renderSidecar(labels))
+	// 1. The sidecar, on our daemon. With a workspace, it mounts only that
+	// workspace (not the whole projects root), at the path the bundle inside
+	// bind-mounts it from.
+	side, err := write(".sidecar.yaml", renderSidecar(labels, ws))
 	if err != nil {
 		return err
 	}
@@ -366,7 +395,12 @@ func (m *Manager) spawn(ctx context.Context, req SpawnRequest, o *op) error {
 		return fmt.Errorf("sidecar daemon unreachable: %w", verr)
 	}
 	// 3. The bundle, inside it.
-	ovr, err := write(".override.yaml", m.renderOverride(req, profs, nil, true))
+	if ws != nil {
+		// Inside the sidecar the workspace is just a directory on its
+		// filesystem: bind it from there.
+		ws.Mount = wsMount{Type: "bind", Source: ws.Mount.Target, Target: ws.Mount.Target}
+	}
+	ovr, err := write(".override.yaml", m.renderOverride(req, profs, nil, true, ws))
 	if err != nil {
 		return err
 	}
@@ -398,7 +432,7 @@ func (m *Manager) childLabels(req SpawnRequest, profs []string) [][2]string {
 		{labelParent, m.cfg.ID}, {labelID, m.childID(req.Name)}, {labelName, req.Name},
 		{labelPrefix, m.prefix(req.Name)}, {labelDocker, req.Docker},
 		{labelProfiles, strings.Join(profs, ",")}, {labelEntry, "true"},
-		{labelSrcProject, req.Project},
+		{labelSrcProject, req.Project}, {labelWorkspace, req.Workspace},
 	}
 }
 
@@ -469,6 +503,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		return err
 	}
 	want := map[string]bool{}
+	leafChildren := map[string]string{} // name -> container, for the NATS leaf remotes below
 	for _, c := range cs {
 		name := c.Config.Labels[labelName]
 		if c.State.Status != "running" || !nameRE.MatchString(name) {
@@ -478,6 +513,12 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		up := m.upstream(c)
 		want[m.routeFile(name)] = true
 		writeIfChanged(m.routeFile(name), m.renderRoute(name, up))
+		leafChildren[name] = c.name()
+	}
+	// Same direction, same trigger as the HTTP routes above: once we're on a
+	// running child's gwlink, dial into its NATS leaf listener too.
+	if m.nats != nil {
+		m.nats.setChildRemotes(m.cfg.NatsLeafPort, leafChildren)
 	}
 	m.ready.Range(func(k, _ any) bool {
 		if !want[m.routeFile(k.(string))] {
@@ -549,21 +590,72 @@ func (m *Manager) dozzlePath() string {
 
 func yq(s string) string { b, _ := json.Marshal(s); return string(b) }
 
-// renderSidecar labels a dind child's sidecar as the gateway's entry.
-func renderSidecar(labels [][2]string) string {
+// renderSidecar labels a dind child's sidecar as the gateway's entry and,
+// for a workspace gateway, narrows its mounts to just that workspace.
+func renderSidecar(labels [][2]string, ws *wsAssignment) string {
 	var b bytes.Buffer
 	b.WriteString("# Generated by gw-server - do not edit.\nservices:\n  dind:\n    labels:\n")
 	for _, kv := range labels {
 		fmt.Fprintf(&b, "      %s: %s\n", kv[0], yq(kv[1]))
 	}
+	if ws != nil {
+		b.WriteString("    volumes: !override\n")
+		writeMount(&b, ws.Mount)
+		b.WriteString("      - dind-data:/var/lib/docker\n")
+		writeExternalVolume(&b, ws.Mount)
+	}
 	return b.String()
+}
+
+// writeMount renders one long-form compose volume entry (6-space list indent).
+func writeMount(b *bytes.Buffer, mt wsMount) {
+	fmt.Fprintf(b, "      - type: %s\n        source: %s\n        target: %s\n", mt.Type, yq(mt.Source), yq(mt.Target))
+}
+
+// writeExternalVolume declares a workspace volume as external: it's created
+// outside compose (spawnWorkspace) precisely so that stopping the gateway -
+// removeProject deletes volumes by compose project label - never deletes
+// the workspace.
+func writeExternalVolume(b *bytes.Buffer, mt wsMount) {
+	if mt.Type == "volume" {
+		fmt.Fprintf(b, "volumes:\n  %s:\n    external: true\n", mt.Source)
+	}
+}
+
+// spawnWorkspace resolves a spawn's workspace into how it's mounted on our
+// daemon, creating a github workspace's volume if it doesn't exist yet. The
+// child itself is only told the workspace's name (and its key); the details
+// it asks for over NATS once we're linked (wsnats.go).
+func (m *Manager) spawnWorkspace(ctx context.Context, o *op, req SpawnRequest) (*wsAssignment, error) {
+	if req.Workspace == "" {
+		return nil, nil
+	}
+	w, err := m.ws.get(req.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	mt := m.hostMount(w)
+	if mt.Type == "volume" {
+		if _, err := dockerOut(ctx, "volume", "inspect", mt.Source); err != nil {
+			fmt.Fprintf(o.Log, "creating workspace volume %s\n", mt.Source)
+			if _, err := dockerOut(ctx, "volume", "create", "--label", "d8z.workspace="+w.Name, mt.Source); err != nil {
+				return nil, err
+			}
+		}
+	} else if st, err := os.Stat(mt.Source); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("workspace %q: %s is not a directory", w.Name, mt.Source)
+	}
+	a := &wsAssignment{Workspace: w, Dir: mt.Target, Mount: mt}
+	a.Token = wsToken(w)
+	a.TokenEnv = ""
+	return a, nil
 }
 
 // renderOverride is the per-child compose override layered on
 // bundle/compose.yaml: identity, prefixes and (host mode) labels. With
 // inDind the bundle runs inside its sidecar, so Traefik publishes 8080 on
 // it instead of joining our gwlink.
-func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]string, inDind bool) string {
+func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]string, inDind bool, ws *wsAssignment) string {
 	id, prefix := m.childID(req.Name), m.prefix(req.Name)
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "# Generated by gw-server (parent %s) - do not edit.\nservices:\n", m.cfg.ID)
@@ -582,6 +674,23 @@ func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]s
 	} {
 		fmt.Fprintf(&b, "      %s: %s\n", kv[0], yq(kv[1]))
 	}
+	if ws != nil {
+		// The workspace gateway: told only which workspace it serves and
+		// the key to unseal the rest (repo, mount, token), which it fetches
+		// from us over NATS; and given that workspace - and only that -
+		// read/write, instead of the projects root and workspace.yaml a
+		// manager gets.
+		for _, kv := range [][2]string{
+			{"GW_WORKSPACE_NAME", ws.Name}, {"GW_WORKSPACE_KEY", m.childKey(id)}, {"GW_PROJECTS_ROOT", ""},
+			// The shared .env's token is the root's, not this workspace's:
+			// keep it out (the workspace's own arrives sealed over NATS).
+			{"GITHUB_TOKEN", ""},
+		} {
+			fmt.Fprintf(&b, "      %s: %s\n", kv[0], yq(kv[1]))
+		}
+		b.WriteString("    volumes: !override\n      - /var/run/docker.sock:/var/run/docker.sock\n      - d8z-nats:/var/lib/d8zgw-nats\n")
+		writeMount(&b, ws.Mount)
+	}
 	if len(labels) > 0 {
 		fmt.Fprintf(&b, "    labels:\n")
 		for _, kv := range labels {
@@ -589,11 +698,18 @@ func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]s
 		}
 	}
 	if inDind {
-		fmt.Fprintf(&b, "    ports: [\"8080:8080\"]\n")
+		// HTTP and the NATS leaf listener, both reached by us at the sidecar.
+		fmt.Fprintf(&b, "    ports: [\"8080:8080\", \"%[1]d:%[1]d\"]\n", m.cfg.NatsLeafPort)
 	}
 	fmt.Fprintf(&b, "  dozzle:\n    environment:\n      DOZZLE_BASE: %s\n", yq(prefix+"/dozzle"))
 	fmt.Fprintf(&b, "  ollama-gatewai:\n    environment:\n      OG_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/og", "/")))
 	fmt.Fprintf(&b, "  gopher:\n    environment:\n      GOPHER_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/gopher", "/")))
+	if ws != nil {
+		// Its Deightz edits the same workspace.
+		b.WriteString("  deightz:\n    environment:\n      GITHUB_TOKEN: \"\"\n    volumes: !override\n      - /var/run/docker.sock:/var/run/docker.sock\n")
+		writeMount(&b, ws.Mount)
+		writeExternalVolume(&b, ws.Mount)
+	}
 	if inDind {
 		// Port publishing is silently dropped on internal networks.
 		fmt.Fprintf(&b, "networks:\n  gwlink:\n    internal: false\n")

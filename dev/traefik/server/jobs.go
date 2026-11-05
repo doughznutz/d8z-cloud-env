@@ -35,6 +35,7 @@ type JobSpec struct {
 	Args        []JobArg `json:"args,omitempty"`
 	Dangerous   bool     `json:"dangerous,omitempty"` // a real external write - console confirms first
 	UsesProject bool     `json:"-"`                   // reads the selected project's files
+	Workspace   bool     `json:"workspace,omitempty"` // repository work: runs only in a workspace's own gateway
 
 	run func(ctx context.Context, j *jobRun) error
 }
@@ -76,20 +77,23 @@ var (
 )
 
 var jobs = []JobSpec{
-	// GitHub (github.go). The repo defaults to the project's own github.com
-	// origin, else GITHUB_ORG/GITHUB_REPO for the .env's PROJECT.
-	{Group: "github", Name: "check_repo", Label: "Check repo exists",
-		Args: []JobArg{ghRepoArg}, UsesProject: true, run: ghCheckRepo},
-	{Group: "github", Name: "create_repo", Label: "Create repo (with an initial README)",
-		Args: []JobArg{ghRepoArg, ghVisArg}, UsesProject: true, Dangerous: true, run: ghCreateRepo},
+	// GitHub (github.go): repository work, so these run only in a
+	// workspace's own gateway (Workspace tab), acting on that workspace with
+	// its own repo and token.
+	{Group: "github", Name: "pull", Label: "Pull from GitHub (clone if empty, else fast-forward)",
+		Args: []JobArg{{Name: "branch", Label: "branch (blank: workspace's)"}}, UsesProject: true, Workspace: true, run: ghPull},
 	{Group: "github", Name: "diff_repo", Label: "Show what a push would change vs the default branch",
-		Args: []JobArg{ghRepoArg}, UsesProject: true, run: ghDiffRepo},
-	{Group: "github", Name: "push_branch", Label: "Push project as a new branch",
-		Args: []JobArg{{Name: "branch", Label: "branch (blank: auto-update-<time>)"}, ghRepoArg}, UsesProject: true, Dangerous: true, run: ghPushBranch},
+		Args: []JobArg{ghRepoArg}, UsesProject: true, Workspace: true, run: ghDiffRepo},
+	{Group: "github", Name: "push_branch", Label: "Push to a branch (a GitHub workspace commits here first)",
+		Args: []JobArg{{Name: "branch", Label: "branch (blank: auto-update-<time>)"}, ghRepoArg}, UsesProject: true, Workspace: true, Dangerous: true, run: ghPushBranch},
 	{Group: "github", Name: "create_pull_request", Label: "Open a pull request",
-		Args: []JobArg{{Name: "branch", Label: "branch", Required: true}, {Name: "title", Label: "title"}, ghRepoArg}, UsesProject: true, Dangerous: true, run: ghCreatePR},
+		Args: []JobArg{{Name: "branch", Label: "branch", Required: true}, {Name: "title", Label: "title"}, ghRepoArg}, UsesProject: true, Workspace: true, Dangerous: true, run: ghCreatePR},
+	{Group: "github", Name: "check_repo", Label: "Check repo exists",
+		Args: []JobArg{ghRepoArg}, UsesProject: true, Workspace: true, run: ghCheckRepo},
+	{Group: "github", Name: "create_repo", Label: "Create repo (with an initial README)",
+		Args: []JobArg{ghRepoArg, ghVisArg}, UsesProject: true, Workspace: true, Dangerous: true, run: ghCreateRepo},
 	{Group: "github", Name: "rename_branch", Label: "Rename a branch",
-		Args: []JobArg{{Name: "old_name", Label: "old name", Required: true}, {Name: "new_name", Label: "new name", Required: true}, ghRepoArg}, UsesProject: true, Dangerous: true, run: ghRenameBranch},
+		Args: []JobArg{{Name: "old_name", Label: "old name", Required: true}, {Name: "new_name", Label: "new name", Required: true}, ghRepoArg}, UsesProject: true, Workspace: true, Dangerous: true, run: ghRenameBranch},
 
 	// Docker Hub (dockerhub.go). Images are DOCKER_HUB_USERNAME/<repo>:<tag>.
 	{Group: "docker", Name: "check_repo", Label: "Check repo exists",
@@ -174,11 +178,27 @@ func (m *Manager) RunJob(group, name, project string, args map[string]string) (s
 			return "", fmt.Errorf("%s/%s: unknown argument %q", group, name, k)
 		}
 	}
+	ws := m.assignment()
+	if spec.Workspace && ws == nil {
+		if m.cfg.WorkspaceName != "" {
+			return "", fmt.Errorf("workspace %q hasn't been assigned by the parent gateway yet", m.cfg.WorkspaceName)
+		}
+		return "", fmt.Errorf("%s/%s is repository work: run it from a workspace's own gateway (root console → Workspaces → start its gateway)", group, name)
+	}
 	if project == "" || project == "self" {
 		project = defaultProject()
 	}
 	j := &jobRun{m: m, spec: spec, args: resolved, project: project}
-	if spec.UsesProject {
+	if ws != nil {
+		// A workspace gateway works on exactly one tree: its workspace.
+		j.project, j.dir = ws.Name, ws.Dir
+		if resolved["repo"] == "" && ws.Repo != "" {
+			resolved["repo"] = ws.Repo // every github job, including pull (which takes no repo arg)
+		}
+		if _, ok := resolved["branch"]; ok && resolved["branch"] == "" && spec.Name == "pull" {
+			resolved["branch"] = ws.Branch
+		}
+	} else if spec.UsesProject {
 		if project == "" {
 			return "", fmt.Errorf("no project selected (and no PROJECT in .env)")
 		}
@@ -198,7 +218,12 @@ func (m *Manager) RunJob(group, name, project string, args map[string]string) (s
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		if spec.UsesProject {
+		if ws != nil && spec.Group == "github" {
+			ctx = withWorkspaceToken(ctx, ws.Name, ws.Token)
+		}
+		if ws != nil {
+			j.logf("workspace: %s (%s)", ws.Name, ws.Dir)
+		} else if spec.UsesProject {
 			j.logf("project: %s", j.project)
 		}
 		m.finishProject("job:"+id, o, spec.run(ctx, j))
