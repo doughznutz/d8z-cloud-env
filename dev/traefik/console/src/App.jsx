@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { WorkspacesPage } from "./Workspaces.jsx";
+import { StopConfirm } from "./StopConfirm.jsx";
 import { api } from "./api.js";
 
 // Sub-apps this console knows how to show; which ones appear comes from
@@ -14,10 +16,10 @@ const SERVICES = {
 const POLL_MS = 3000;
 const SELF_POLL_MS = 5000;
 
-const isUp = (s) => s?.state === "running";
+export const isUp = (s) => s?.state === "running";
 
 // Summarise a bundle's containers: "3/4 up", plus whether anything is down.
-function health(services) {
+export function health(services) {
   const list = services || [];
   const up = list.filter(isUp).length;
   return { up, total: list.length, degraded: up < list.length };
@@ -64,10 +66,9 @@ export default function App() {
   const [selfErr, setSelfErr] = useState(null);
   const [gateways, setGateways] = useState([]);
   const [gwErr, setGwErr] = useState(null);
-  const [projects, setProjects] = useState([]);
-  const [projErr, setProjErr] = useState(null);
+  const [wsInfo, setWsInfo] = useState(null);
+  const [wsErr, setWsErr] = useState(null);
   const [jobsCatalog, setJobsCatalog] = useState([]);
-  const [jobsDefaultProject, setJobsDefaultProject] = useState("");
   const [jobRuns, setJobRuns] = useState({});
 
   const refreshSelf = useCallback(async () => {
@@ -91,25 +92,20 @@ export default function App() {
   }, []);
   usePoll(refresh, POLL_MS);
 
-  const refreshProjects = useCallback(async () => {
-    if (!self?.projectsEnabled) return;
+  const refreshWorkspaces = useCallback(async () => {
     try {
-      const r = await api.projects();
-      setProjects(r.projects || []);
-      setProjErr(r.error || null);
+      setWsInfo(await api.workspaces());
+      setWsErr(null);
     } catch (e) {
-      setProjErr(e.message);
+      setWsErr(e.message);
     }
-  }, [self?.projectsEnabled]);
-  usePoll(refreshProjects, POLL_MS);
+  }, []);
+  usePoll(refreshWorkspaces, POLL_MS);
 
   useEffect(() => {
     api
       .jobs()
-      .then((r) => {
-        setJobsCatalog(r.jobs || []);
-        setJobsDefaultProject(r.defaultProject || "");
-      })
+      .then((r) => setJobsCatalog(r.jobs || []))
       .catch(() => {});
   }, []);
   const refreshJobRuns = useCallback(async () => {
@@ -126,6 +122,14 @@ export default function App() {
     () =>
       (self?.services || [])
         .filter((s) => SERVICES[s])
+        // Only services this bundle actually has: the root starts with just
+        // traefik + dozzle, editors live in the workspace gateways.
+        .filter(
+          (s) =>
+            (s === "dozzle" && self.dozzlePath) ||
+            self.bundleError ||
+            (self.bundle || []).some((b) => b.service === SERVICES[s].compose)
+        )
         .map((s) => {
           // A host bundle has no dozzle of its own: link the one watching
           // the daemon it shares.
@@ -141,26 +145,22 @@ export default function App() {
     [self]
   );
 
-  // Routes: "<service>", "status", "new", "gw/<name>", "gw/<name>/info",
-  // "newproj", "proj/<name>".
+  // Routes: "<service>", "status", "workspaces", "jobs", "gw/<name>",
+  // "gw/<name>/info". ("new" - the old New gateway page - now lands on
+  // Workspaces, where gateways are started.)
   const route = useMemo(() => {
-    if (hash === "new") return { kind: "new" };
-    if (hash === "newproj") return { kind: "newproj" };
+    if (hash === "workspaces" || hash === "new") return { kind: "workspaces" };
     if (hash === "jobs") return { kind: "jobs" };
     if (hash === "status") return { kind: "status" };
     if (hash.startsWith("gw/")) {
       const [name, sub] = hash.slice(3).split("/");
       return { kind: "gw", name, info: sub === "info" };
     }
-    if (hash.startsWith("proj/")) {
-      return { kind: "proj", name: hash.slice(5) };
-    }
     const svc = services.find((s) => s.id === hash) || services[0];
     return svc ? { kind: "svc", id: svc.id } : self ? { kind: "status" } : { kind: "loading" };
   }, [hash, services, self]);
 
   const current = route.kind === "gw" ? gateways.find((g) => g.name === route.name) : null;
-  const currentProj = route.kind === "proj" ? projects.find((p) => p.name === route.name) : null;
   const currentSvc = route.kind === "svc" ? services.find((s) => s.id === route.id) : null;
   // A service whose container we can see but isn't running gets a status
   // panel with its logs instead of an iframe full of 502s.
@@ -203,13 +203,9 @@ export default function App() {
         ? SERVICES[route.id]?.name
         : route.kind === "gw"
           ? `gw/${route.name}`
-          : route.kind === "proj"
-            ? `proj/${route.name}`
-            : route.kind === "new"
-              ? "New gateway"
-              : route.kind === "newproj"
-                ? "New project"
-                : route.kind === "jobs"
+          : route.kind === "workspaces"
+            ? "Workspaces"
+            : route.kind === "jobs"
                   ? "Deployment"
                   : route.kind === "status"
                     ? "Gateway"
@@ -219,29 +215,18 @@ export default function App() {
 
   const [collapsed, setCollapsed] = useStored(`d8z-nav-collapsed:${self?.id || "root"}`, false);
 
-  // Root-only: which project this console is currently working on. ""
-  // means "not chosen yet" (the fresh-start state - gates Deightz below);
-  // "self" means explicitly this repo; anything else is a project name.
-  // New gateways inherit whichever is picked; a sub-gateway's own project
-  // comes from its spawn request instead, never from this picker.
-  const [storedProject, setSelectedProject] = useStored(`d8z-project:${self?.id || "root"}`, "");
-  const selectedProject =
-    storedProject === "self" || projects.some((p) => p.name === storedProject) ? storedProject : "";
-
   return (
     <div className="app" title="App shell">
       <Sidebar
         self={self}
         services={services}
         gateways={gateways}
-        projects={projects}
+        wsInfo={wsInfo}
         route={route}
         collapsed={collapsed}
         onToggle={() => setCollapsed(!collapsed)}
         popout={popout}
         refresh={refresh}
-        selectedProject={selectedProject}
-        onSelectProject={setSelectedProject}
         onReload={activeFrame ? () => setReloads((r) => ({ ...r, [activeFrame]: (r[activeFrame] || 0) + 1 })) : null}
       />
       <main title="Main canvas — shows the selected service, gateway, or panel">
@@ -251,38 +236,36 @@ export default function App() {
         {!activeFrame && (
           <div className="panel-wrap" title="Panel area — forms and status pages that aren't an embedded sub-app">
             {selfErr && <div className="banner error">Console API unreachable: {selfErr}</div>}
-            {route.kind === "new" && self && (
-              <NewGateway
+            {route.kind === "workspaces" && self && (
+              <WorkspacesPage
+                info={wsInfo}
+                err={wsErr}
+                onChanged={() => {
+                  refreshWorkspaces();
+                  refresh();
+                }}
+                catalog={jobsCatalog}
+                runs={jobRuns}
+                onRan={refreshJobRuns}
                 self={self}
-                gateways={gateways}
-                projects={projects}
-                defaultProject={selectedProject}
-                onCreated={refresh}
               />
             )}
-            {route.kind === "newproj" && self && <NewProject onCreated={refreshProjects} />}
             {route.kind === "status" && self && (
               <StatusPage
                 self={self}
                 gateways={gateways}
                 gwErr={gwErr}
                 refreshSelf={refreshSelf}
-                selectedProject={selectedProject}
               />
             )}
             {route.kind === "svc" && svcDown && <ServiceDown svc={currentSvc} />}
             {route.kind === "gw" && <GatewayDetails name={route.name} gw={current} gwErr={gwErr} />}
-            {route.kind === "proj" && (
-              <ProjectDetails name={route.name} proj={currentProj} projErr={projErr} onChanged={refreshProjects} />
-            )}
             {route.kind === "jobs" && self && (
               <JobsPage
                 catalog={jobsCatalog}
                 runs={jobRuns}
                 onRan={refreshJobRuns}
-                project={selectedProject}
-                defaultProject={jobsDefaultProject}
-                projectsEnabled={self.projectsEnabled}
+                workspace={self.workspace}
               />
             )}
             {route.kind === "loading" && !selfErr && <p className="muted">Loading…</p>}
@@ -297,14 +280,12 @@ function Sidebar({
   self,
   services,
   gateways,
-  projects,
+  wsInfo,
   route,
   collapsed,
   onToggle,
   popout,
   refresh,
-  selectedProject,
-  onSelectProject,
   onReload,
 }) {
   const [confirm, setConfirm] = useState(null);
@@ -338,42 +319,6 @@ function Sidebar({
         </button>
       </header>
 
-      {self?.projectsEnabled && (
-        <div
-          className="project-picker"
-          title="Which project this console is working on - gates Deightz until set, and is what new gateways spawn from by default. A sub-gateway's own project comes from its spawn request instead."
-        >
-          <span className="section" style={{ padding: 0, marginBottom: 4 }}>
-            Project
-          </span>
-          <select
-            value={selectedProject}
-            onChange={(e) => {
-              if (e.target.value === "__new__") {
-                location.hash = "newproj";
-                return;
-              }
-              onSelectProject(e.target.value);
-            }}
-            className={selectedProject ? "picked" : "unset"}
-          >
-            {!selectedProject && (
-              <option value="" disabled>
-                — select —
-              </option>
-            )}
-            <option value="self">this repo</option>
-            {projects.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-                {!p.hasBundle ? " (no bundle)" : ""}
-              </option>
-            ))}
-            <option value="__new__">+ New project…</option>
-          </select>
-        </div>
-      )}
-
       <ul title="Gateway entry — this gateway's own health">
         <li>
           <a href="#status" className={route.kind === "status" ? "active" : ""} title="Status of this gateway">
@@ -392,9 +337,37 @@ function Sidebar({
         </li>
       </ul>
 
-      <ul title="Deployment — one-shot GitHub, Docker Hub and GCP actions">
+      {self?.workspace && (
+      <ul title="This gateway's workspace — pull, diff, push and pull requests">
         <li>
-          <a href="#jobs" className={route.kind === "jobs" ? "active" : ""} title="GitHub, Docker Hub and GCP actions">
+          <a
+            href="#workspaces"
+            className={route.kind === "workspaces" ? "active" : ""}
+            title={
+              self?.workspace
+                ? "This gateway's workspace: pull, diff, push and pull requests"
+                : "Add and remove workspaces, and start a gateway for each"
+            }
+          >
+            <span className="ico">▤</span>
+            <span className="label">
+              {self?.workspace ? "Workspace" : "Workspaces"}
+              <small>
+                {self?.workspace
+                  ? self.workspace.name
+                  : wsInfo?.workspaces
+                    ? `${wsInfo.workspaces.length} configured · ${wsInfo.workspaces.filter((w) => w.gw).length} with gateway`
+                    : "…"}
+              </small>
+            </span>
+          </a>
+        </li>
+      </ul>
+      )}
+
+      <ul title="Deployment — one-shot Docker Hub and GCP actions">
+        <li>
+          <a href="#jobs" className={route.kind === "jobs" ? "active" : ""} title="Docker Hub and GCP actions">
             <span className="ico">⚙</span>
             <span className="label">Deployment</span>
           </a>
@@ -427,8 +400,11 @@ function Sidebar({
         ))}
       </ul>
 
-      <div className="section" title="Gateways section — child gateways spawned from this one, cascaded under /gw/<name>/">
-        Gateways
+      <div
+        className="section"
+        title="Workspaces section — each workspace's own gateway (its editor and repository tools), cascaded under /gw/<name>/"
+      >
+        Workspaces
       </div>
       <ul>
         {gateways.map((g) => {
@@ -440,13 +416,13 @@ function Sidebar({
               <a
                 href={`#gw/${g.name}`}
                 className={route.kind === "gw" && route.name === g.name ? "active" : ""}
-                title={`${g.name}: ${g.phase || g.state}`}
+                title={`${g.workspace ? `${g.workspace} (gw/${g.name})` : `gw/${g.name}`}: ${g.phase || g.state}`}
               >
                 <span className="ico">
                   <span className={`dot ${dot}`} />
                 </span>
                 <span className="label">
-                  {g.name}
+                  {g.workspace || g.name}
                   <small className={g.state === "error" || (g.state === "running" && h.degraded) ? "error-text" : ""}>
                     {busy
                       ? g.phase || g.state
@@ -457,12 +433,9 @@ function Sidebar({
                 </span>
               </a>
               {confirm === g.name ? (
-                <span className="confirm label">
-                  <button className="danger" onClick={() => stop(g.name)}>
-                    Stop
-                  </button>
-                  <button onClick={() => setConfirm(null)}>Keep</button>
-                </span>
+                <div className="confirm label">
+                  <StopConfirm gw={g} compact onStop={() => stop(g.name)} onKeep={() => setConfirm(null)} />
+                </div>
               ) : (
                 <span className="row-actions label">
                   <a className="icon-btn" href={`#gw/${g.name}/info`} title={`Details for ${g.name}`}>
@@ -478,12 +451,25 @@ function Sidebar({
             </li>
           );
         })}
-        <li>
-          <a href="#new" className={route.kind === "new" ? "active" : ""} title="New gateway">
-            <span className="ico">＋</span>
-            <span className="label">New gateway</span>
-          </a>
-        </li>
+        {!self?.workspace && (
+          <li>
+            <a
+              href="#workspaces"
+              className={route.kind === "workspaces" ? "active" : ""}
+              title="Add, edit and remove workspaces; start or stop each one's gateway"
+            >
+              <span className="ico">▤</span>
+              <span className="label">
+                Manage workspaces
+                <small>
+                  {wsInfo?.workspaces
+                    ? `${wsInfo.workspaces.length} configured · ${wsInfo.workspaces.filter((w) => w.gw).length} running`
+                    : "…"}
+                </small>
+              </span>
+            </a>
+          </li>
+        )}
       </ul>
 
       {err && <div className="banner error label">{err}</div>}
@@ -506,7 +492,7 @@ function Sidebar({
 
 // LogView fetches text and keeps it fresh while `live`; sticks to the
 // bottom unless the user has scrolled up to read.
-function LogView({ load, live = true, empty = "No output." }) {
+export function LogView({ load, live = true, empty = "No output." }) {
   const [text, setText] = useState(null);
   const [err, setErr] = useState(null);
   const pre = useRef(null);
@@ -575,7 +561,7 @@ function ServicesTable({ services, logsFor, actions }) {
   );
 }
 
-function StatusPage({ self, gateways, gwErr, refreshSelf, selectedProject }) {
+function StatusPage({ self, gateways, gwErr, refreshSelf }) {
   const logsFor = useCallback((svc) => () => api.serviceLogs(svc), []);
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
@@ -597,7 +583,7 @@ function StatusPage({ self, gateways, gwErr, refreshSelf, selectedProject }) {
     setErr(null);
     setBusy(svc);
     try {
-      await (running ? api.stopLocal(svc) : api.startLocal(svc, selectedProject));
+      await (running ? api.stopLocal(svc) : api.startLocal(svc));
     } catch (e) {
       setErr(`${svc}: ${e.message}`);
     }
@@ -611,15 +597,13 @@ function StatusPage({ self, gateways, gwErr, refreshSelf, selectedProject }) {
     const op = localOps[s.service];
     const opBusy = op && (op.state === "starting" || op.state === "stopping");
     const running = isUp(s);
-    // Fresh-start guard: Deightz opens whichever project is picked up top
-    // (DEFAULT_WORKSPACE), so starting it before anything's picked just
-    // opens the wrong thing. Only blocks the initial Start, root only
-    // (self.projectsEnabled is already root-only), and never once running.
-    if (s.service === "deightz" && self.projectsEnabled && !selectedProject && !running) {
+    // Editors belong to workspaces: on a manager, Deightz is started per
+    // workspace (Workspaces tab), not here.
+    if (s.service === "deightz" && !self.workspace && !running && s.state === "absent") {
       return (
-        <span className="svc-status error-text" title="Pick a project in the sidebar first">
-          select a project ↑
-        </span>
+        <a className="svc-status" href="#workspaces" title="Each workspace gets its own gateway with a Deightz">
+          start one per workspace →
+        </a>
       );
     }
     return (
@@ -644,6 +628,17 @@ function StatusPage({ self, gateways, gwErr, refreshSelf, selectedProject }) {
         <dd>
           <code>{self.prefix || ""}/</code>
         </dd>
+        {self.workspace && (
+          <>
+            <dt>Workspace</dt>
+            <dd>
+              <a href="#workspaces">
+                <code>{self.workspace.name}</code>
+              </a>{" "}
+              <span className="muted">({self.workspace.source})</span>
+            </dd>
+          </>
+        )}
         <dt>Runs on</dt>
         <dd>
           {self.isolated ? "its own dind sidecar (isolated bundle)" : "a shared docker daemon"}{" "}
@@ -660,11 +655,11 @@ function StatusPage({ self, gateways, gwErr, refreshSelf, selectedProject }) {
       {err && <div className="banner error">{err}</div>}
       <ServicesTable services={bundleRows} logsFor={logsFor} actions={localActions} />
 
-      <h3>Child gateways</h3>
+      <h3>Workspace gateways</h3>
       {gwErr && <div className="banner error">{gwErr}</div>}
       {gateways.length === 0 ? (
         <p className="muted">
-          None. <a href="#new">Start one →</a>
+          None. <a href="#workspaces">Start one from Workspaces →</a>
         </p>
       ) : (
         <div className="svc-table">
@@ -675,7 +670,7 @@ function StatusPage({ self, gateways, gwErr, refreshSelf, selectedProject }) {
                 <div className="svc-head">
                   <span className={`dot ${g.state === "running" && h.degraded ? "degraded" : g.state}`} />
                   <a href={`#gw/${g.name}/info`}>
-                    <code>gw/{g.name}</code>
+                    <code>{g.workspace || `gw/${g.name}`}</code>
                   </a>
                   <span className={`svc-status ${g.state === "error" || h.degraded ? "error-text" : "muted"}`}>
                     {g.phase || g.error || `${g.state} · ${h.up}/${h.total} up`}
@@ -719,7 +714,7 @@ function GatewayDetails({ name, gw, gwErr }) {
       <div className="panel">
         <h2>gw/{name}</h2>
         <p className="muted">{gwErr ? `Can't list gateways: ${gwErr}` : "This gateway doesn't exist (any more)."}</p>
-        <a href="#new">Start a new gateway →</a>
+        <a href="#workspaces">Workspaces →</a>
       </div>
     );
   }
@@ -744,8 +739,10 @@ function GatewayDetails({ name, gw, gwErr }) {
         <dd>
           <code>{gw.project}</code>
         </dd>
-        <dt>Source</dt>
-        <dd>{gw.srcProject ? <code>proj/{gw.srcProject}</code> : "this repo"}</dd>
+        <dt>Workspace</dt>
+        <dd>{gw.workspace ? <a href="#workspaces"><code>{gw.workspace}</code></a> : <span className="muted">none</span>}</dd>
+        <dt>Bundle from</dt>
+        <dd>{gw.srcProject ? <code>~/projects/{gw.srcProject}</code> : "this repo"}</dd>
         <dt>Prefix</dt>
         <dd>
           <code>{gw.prefix}/</code>
@@ -777,346 +774,37 @@ function GatewayDetails({ name, gw, gwErr }) {
   );
 }
 
-function NewGateway({ self, gateways, projects, defaultProject, onCreated }) {
-  const uiProfiles = self.profiles || [];
-  const bundleProjects = (projects || []).filter((p) => p.hasBundle);
-  const [name, setName] = useState("");
-  const [picked, setPicked] = useState(() => new Set(["deightz"]));
-  const [docker, setDocker] = useState("host");
-  // Inherits the sidebar's current project pick, if it's actually spawnable.
-  const [project, setProject] = useState(() =>
-    bundleProjects.some((p) => p.name === defaultProject) ? defaultProject : ""
-  );
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-
-  // One dozzle per docker daemon: a dind bundle is a new daemon and always
-  // gets one; a host bundle shares ours (and our dozzle). The server
-  // enforces the same rule.
-  const fixed = (n) => (n === "dozzle" ? docker === "dind" : null);
-
-  const nameOk = /^[a-z][a-z0-9]{0,15}$/.test(name);
-  const taken = gateways.some((g) => g.name === name);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!nameOk || taken) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.spawn({ name, profiles: [...picked].filter((n) => fixed(n) === null), docker, project });
-      await onCreated();
-      location.hash = `gw/${name}`;
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const toggle = (n) =>
-    setPicked((s) => {
-      const next = new Set(s);
-      next.has(n) ? next.delete(n) : next.add(n);
-      return next;
-    });
-
-  return (
-    <form className="panel" onSubmit={submit}>
-      <h2>New gateway</h2>
-      <p className="muted">
-        Starts an isolated bundle of services behind its own Traefik, mounted here at{" "}
-        <code>
-          {self.prefix || ""}/gw/{name || "<name>"}/
-        </code>
-        . Only the two Traefiks share a network.
-      </p>
-      {!self.dockerOK && (
-        <div className="banner error">
-          This gateway can't reach Docker: {self.dockerError}
-        </div>
-      )}
-
-      <label className="field">
-        <span>Name</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value.toLowerCase())}
-          placeholder="e.g. sandbox"
-          autoFocus
-          maxLength={16}
-        />
-        <small className={name && (!nameOk || taken) ? "error-text" : "muted"}>
-          {taken ? "Already exists." : "Lowercase letters and digits, starting with a letter."}
-        </small>
-      </label>
-
-      {bundleProjects.length > 0 && (
-        <label className="field">
-          <span>Project</span>
-          <select value={project} onChange={(e) => setProject(e.target.value)}>
-            <option value="">this repo</option>
-            {bundleProjects.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <small className="muted">
-            Which source tree's own dev/traefik/bundle/compose.yaml to spawn.
-            {defaultProject && defaultProject !== "self" && !bundleProjects.some((p) => p.name === defaultProject)
-              ? ` Sidebar has "${defaultProject}" selected, but it has no bundle - defaulted to this repo.`
-              : " Inherited from the sidebar's project picker; change it here just for this spawn."}
-          </small>
-        </label>
-      )}
-
-      <fieldset className="field">
-        <legend>Services</legend>
-        {uiProfiles.map((p) => (
-          <label key={p.name} className="check">
-            <input
-              type="checkbox"
-              checked={fixed(p.name) ?? picked.has(p.name)}
-              disabled={fixed(p.name) !== null}
-              onChange={() => toggle(p.name)}
-            />
-            {p.label} <code>{p.name}</code>
-            {p.name === "dozzle" && (
-              <small className="muted">
-                {docker === "dind" ? " (one per docker daemon: always on for dind)" : " (shares this daemon's dozzle)"}
-              </small>
-            )}
-          </label>
-        ))}
-      </fieldset>
-
-      <fieldset className="field">
-        <legend>Where the bundle runs</legend>
-        <label className="check">
-          <input type="radio" name="docker" checked={docker === "host"} onChange={() => setDocker("host")} />
-          <span>
-            <b>host</b>: on this gateway's daemon. Starts fast and reuses images, but its docker-using services (dozzle,
-            deightz) can see sibling bundles.
-          </span>
-        </label>
-        <label className="check">
-          <input type="radio" name="docker" checked={docker === "dind"} onChange={() => setDocker("dind")} />
-          <span>
-            <b>dind</b>: inside its own dind sidecar; only the sidecar links up to this gateway. Fully isolated: dozzle
-            shows exactly the bundle and its children. Images are copied in first, which takes a while for big ones.
-          </span>
-        </label>
-      </fieldset>
-
-      {err && <div className="banner error">{err}</div>}
-      <div className="actions">
-        <button className="primary" disabled={busy || !nameOk || taken || !self.dockerOK}>
-          {busy ? "Starting…" : "Start gateway"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function ProjectDetails({ name, proj, projErr, onChanged }) {
-  const logsFor = useCallback((svc) => () => api.projectLog(name), [name]);
-  const loadLog = useCallback(() => api.projectLog(name), [name]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-
-  if (!proj) {
-    return (
-      <div className="panel">
-        <h2>proj/{name}</h2>
-        <p className="muted">{projErr ? `Can't list projects: ${projErr}` : "This project doesn't exist (any more)."}</p>
-        <a href="#newproj">Provision a new project →</a>
-      </div>
-    );
-  }
-
-  const h = health(proj.services);
-  const running = h.total > 0;
-  const opBusy = proj.state === "starting" || proj.state === "stopping";
-
-  async function toggle() {
-    setErr(null);
-    setBusy(true);
-    try {
-      await (running ? api.stopProject(name) : api.startProject(name));
-    } catch (e) {
-      setErr(e.message);
-    }
-    setBusy(false);
-    onChanged();
-  }
-
-  return (
-    <div className="panel wide">
-      <h2>
-        <span className={`dot ${opBusy ? proj.state : running ? (h.degraded ? "degraded" : "running") : ""}`} />{" "}
-        proj/{proj.name}
-      </h2>
-      {proj.phase && (
-        <p className="phase">
-          {opBusy && <span className="spinner" />} {proj.phase}
-        </p>
-      )}
-      {proj.error && <div className="banner error">{proj.error}</div>}
-      {err && <div className="banner error">{err}</div>}
-      <dl className="facts">
-        <dt>Path</dt>
-        <dd>
-          <code>~/projects/{proj.name}</code>
-        </dd>
-        <dt>Has</dt>
-        <dd>
-          {proj.hasCompose ? "docker-compose.yaml" : "no docker-compose.yaml"}
-          {proj.hasBundle && ", dev/traefik/bundle/compose.yaml (spawnable as a gateway)"}
-        </dd>
-      </dl>
-
-      {proj.hasCompose && (
-        <div className="actions">
-          <button className="primary" disabled={busy || opBusy} onClick={toggle}>
-            {opBusy ? proj.phase || proj.state : running ? "Stop" : "Start"}
-          </button>
-          {proj.hasBundle && (
-            <a className="h-link" href={`#new`}>
-              Spawn a gateway from this project →
-            </a>
-          )}
-        </div>
-      )}
-
-      <h3>Containers</h3>
-      <ServicesTable services={proj.services} logsFor={logsFor} />
-
-      <h3>Start / stop log</h3>
-      <LogView load={loadLog} live={opBusy} empty="Nothing logged." />
-    </div>
-  );
-}
-
-function NewProject({ onCreated }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState("self");
-  const [url, setUrl] = useState("");
-  const [ref, setRef] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const nameOk = /^[a-z][a-z0-9-]{0,63}$/.test(name);
-  const urlOk = kind === "self" || url.trim() !== "";
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!nameOk || !urlOk) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const source = kind === "self" ? { kind } : { kind, url: url.trim(), ref: ref.trim() };
-      await api.createProject({ name, source });
-      await onCreated();
-      location.hash = `proj/${name}`;
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form className="panel" onSubmit={submit}>
-      <h2>New project</h2>
-      <p className="muted">
-        Provisions <code>~/projects/{name || "<name>"}</code> on the host. A directory that already exists there is
-        never overwritten - this only ever creates a new one.
-      </p>
-
-      <label className="field">
-        <span>Name</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value.toLowerCase())}
-          placeholder="e.g. d8z-cloud-env-next"
-          autoFocus
-          maxLength={64}
-        />
-        <small className={name && !nameOk ? "error-text" : "muted"}>
-          Lowercase letters, digits and dashes, starting with a letter.
-        </small>
-      </label>
-
-      <fieldset className="field">
-        <legend>Source</legend>
-        <label className="check">
-          <input type="radio" name="kind" checked={kind === "self"} onChange={() => setKind("self")} />
-          <span>
-            <b>This repo</b>: a plain copy of this image's own checkout - the quickest way to get a second, independent
-            copy of this same stack to spawn as a gateway.
-          </span>
-        </label>
-        <label className="check">
-          <input type="radio" name="kind" checked={kind === "git"} onChange={() => setKind("git")} />
-          <span>
-            <b>Git clone</b>: a shallow clone of a repository - e.g. to pull the latest version of this project, or to
-            bring in an unrelated one.
-          </span>
-        </label>
-        {kind === "git" && (
-          <>
-            <label className="field">
-              <span>URL</span>
-              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/org/repo.git" />
-            </label>
-            <label className="field">
-              <span>Ref (optional)</span>
-              <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="branch, tag or empty for default" />
-            </label>
-          </>
-        )}
-      </fieldset>
-
-      {err && <div className="banner error">{err}</div>}
-      <div className="actions">
-        <button className="primary" disabled={busy || !nameOk || !urlOk}>
-          {busy ? "Provisioning…" : "Create project"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
 const JOB_GROUPS = { github: "GitHub", docker: "Docker Hub", cloud: "GCP" };
 
-function JobsPage({ catalog, runs, onRan, project, defaultProject, projectsEnabled }) {
+function JobsPage({ catalog, runs, onRan, workspace }) {
+  // Repository work (github/*) lives on the Workspace tab of a workspace's
+  // own gateway; this page keeps the deployment targets.
   const groups = useMemo(() => {
     const g = {};
-    for (const j of catalog || []) (g[j.group] ||= []).push(j);
+    for (const j of catalog || []) if (!j.workspace) (g[j.group] ||= []).push(j);
     return g;
   }, [catalog]);
 
   if (!catalog || catalog.length === 0) return <p className="muted">Loading…</p>;
 
-  // "" / "self" both mean the .env's own PROJECT on the server side.
-  const target = project && project !== "self" ? project : defaultProject;
-
   return (
     <div className="panel wide">
       <h2>Deployment</h2>
       <p className="muted">
-        One-shot actions against GitHub, Docker Hub and GCP. GitHub and Docker Hub run directly in the gateway; GCP
-        runs in the <code>dev/cloud</code> container. Dangerous ones (a push, a repo or branch write, a billable
-        instance) ask you to confirm first.
+        One-shot actions against Docker Hub and GCP. Docker Hub runs directly in the gateway; GCP runs in the{" "}
+        <code>dev/cloud</code> container. Dangerous ones (a push, a repo write, a billable instance) ask you to confirm
+        first. GitHub pull / diff / push / pull requests moved to <a href="#workspaces">{workspace ? "Workspace" : "Workspaces"}</a>.
       </p>
       <dl className="facts">
-        <dt>Project</dt>
+        <dt>Builds from</dt>
         <dd>
-          {target ? <code>{target}</code> : <span className="error-text">none - pick one in the sidebar</span>}{" "}
-          <span className="muted">
-            {projectsEnabled ? "(the sidebar's selection; GitHub repo defaults to its git origin)" : "(child gateway: no project files)"}
-          </span>
+          {workspace ? (
+            <>
+              workspace <code>{workspace.name}</code>
+            </>
+          ) : (
+            <span className="muted">this gateway's own project (.env PROJECT)</span>
+          )}
         </dd>
       </dl>
       {Object.entries(groups).map(([group, items]) => (
@@ -1124,7 +812,7 @@ function JobsPage({ catalog, runs, onRan, project, defaultProject, projectsEnabl
           <h3>{JOB_GROUPS[group] || group}</h3>
           <div className="svc-table">
             {items.map((j) => (
-              <JobRow key={`${j.group}/${j.name}`} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} project={project} />
+              <JobRow key={`${j.group}/${j.name}`} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
             ))}
           </div>
         </div>
@@ -1133,7 +821,7 @@ function JobsPage({ catalog, runs, onRan, project, defaultProject, projectsEnabl
   );
 }
 
-function JobRow({ job, run, onRan, project }) {
+export function JobRow({ job, run, onRan, project = "" }) {
   const id = `${job.group}/${job.name}`;
   const [args, setArgs] = useState({});
   const [confirm, setConfirm] = useState(false);

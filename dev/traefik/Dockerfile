@@ -12,7 +12,7 @@ RUN if [ -f package-lock.json ]; then npm ci --no-audit --loglevel=error; else n
 COPY dev/traefik/console/ ./
 RUN npm run build
 
-FROM golang:1.22-alpine AS server
+FROM golang:1.26-alpine AS server
 WORKDIR /src
 COPY dev/traefik/server/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /gw-server .

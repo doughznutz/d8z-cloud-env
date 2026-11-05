@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -113,7 +114,24 @@ func doJSON(ctx context.Context, method, u string, hdr http.Header, body, out an
 	return nil
 }
 
-func githubToken() (string, error) {
+// wsTokenKey carries a workspace's own GitHub token through a job's ctx.
+// Present (even empty) means "this job acts for a workspace": its token is
+// the only one used - never a silent fallback to the .env's GITHUB_TOKEN.
+type wsTokenKey struct{}
+
+type wsTokenVal struct{ ws, tok string }
+
+func withWorkspaceToken(ctx context.Context, ws, tok string) context.Context {
+	return context.WithValue(ctx, wsTokenKey{}, wsTokenVal{ws, tok})
+}
+
+func githubToken(ctx context.Context) (string, error) {
+	if v, ok := ctx.Value(wsTokenKey{}).(wsTokenVal); ok {
+		if v.tok == "" {
+			return "", fmt.Errorf("workspace %q has no GitHub token - set one on the root console's Workspaces tab", v.ws)
+		}
+		return v.tok, nil
+	}
 	t := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	if t == "" {
 		return "", fmt.Errorf("GITHUB_TOKEN is not set in .env (or the shell compose ran from)")
@@ -122,7 +140,7 @@ func githubToken() (string, error) {
 }
 
 func gh(ctx context.Context, method, path string, body, out any) error {
-	tok, err := githubToken()
+	tok, err := githubToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -285,30 +303,41 @@ func ghCreateRepo(ctx context.Context, j *jobRun) error {
 // header, passed through GIT_CONFIG_* so it never appears in argv, a remote
 // URL, or the job log; and lets root (gw-server) read checkouts owned by the
 // host user.
+// An empty token (a public repo) sends no header at all.
 func gitEnv(tok string) []string {
-	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-	return append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
-		"GIT_CONFIG_KEY_1=safe.directory",
-		"GIT_CONFIG_VALUE_1=*",
-	)
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*")
+	if tok != "" {
+		basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
+		env = append(env, "GIT_CONFIG_COUNT=2",
+			"GIT_CONFIG_KEY_1=http.https://github.com/.extraheader",
+			"GIT_CONFIG_VALUE_1=Authorization: Basic "+basic)
+	}
+	return env
 }
 
 type gitCmd struct {
-	ctx context.Context
-	log io.Writer
-	env []string
-	pre []string // --git-dir / --work-tree
+	ctx    context.Context
+	log    io.Writer
+	env    []string
+	pre    []string // --git-dir / --work-tree, or -C <dir>
+	editor bool     // run as the editor user, for anything that writes into a workspace
+}
+
+func (g gitCmd) command(args []string) *exec.Cmd {
+	cmd := exec.CommandContext(g.ctx, "git", append(append([]string{}, g.pre...), args...)...)
+	cmd.Env = g.env
+	if g.editor {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: editorUID, Gid: editorGID}}
+		cmd.Env = append(append([]string{}, g.env...), "HOME=/tmp")
+	}
+	return cmd
 }
 
 func (g gitCmd) run(args ...string) error {
-	all := append(append([]string{}, g.pre...), args...)
 	fmt.Fprintf(g.log, "$ git %s\n", strings.Join(args, " "))
-	cmd := exec.CommandContext(g.ctx, "git", all...)
-	cmd.Env, cmd.Stdout, cmd.Stderr = g.env, g.log, g.log
+	cmd := g.command(args)
+	cmd.Stdout, cmd.Stderr = g.log, g.log
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git %s: %v", args[0], err)
 	}
@@ -317,8 +346,8 @@ func (g gitCmd) run(args ...string) error {
 
 func (g gitCmd) out(args ...string) (string, error) {
 	var buf bytes.Buffer
-	cmd := exec.CommandContext(g.ctx, "git", append(append([]string{}, g.pre...), args...)...)
-	cmd.Env, cmd.Stdout, cmd.Stderr = g.env, &buf, &buf
+	cmd := g.command(args)
+	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
 	return strings.TrimSpace(buf.String()), err
 }
@@ -349,7 +378,7 @@ func ghSnapshot(ctx context.Context, j *jobRun, r ghRepo) (gitCmd, func(), error
 	if err != nil {
 		return gitCmd{}, nil, err
 	}
-	tok, err := githubToken()
+	tok, err := githubToken(ctx)
 	if err != nil {
 		return gitCmd{}, nil, err
 	}
@@ -425,6 +454,15 @@ func ghPushBranch(ctx context.Context, j *jobRun) error {
 	if err != nil {
 		return err
 	}
+	// A GitHub workspace's checkout is ours (it lives in its volume): commit
+	// right there, so the workspace's own history - and the open-work check
+	// before a stop - reflect what was pushed. A local workspace is the
+	// user's own directory, so it's pushed from a snapshot and never written.
+	if a := j.m.assignment(); a != nil && a.Source == "github" {
+		if _, isGit, _ := wsGitState(j.dir); isGit {
+			return ghPushInPlace(ctx, j, r, branch, login)
+		}
+	}
 	g, cleanup, err := ghSnapshot(ctx, j, r)
 	if err != nil {
 		return err
@@ -498,4 +536,85 @@ func ghRenameBranch(ctx context.Context, j *jobRun) error {
 	}
 	j.logf("Renamed %s: %q -> %q", r, oldName, out.Name)
 	return nil
+}
+
+// ghPull brings the workspace up to date with GitHub: a fresh clone into an
+// empty workspace (a new github workspace's volume), else a fast-forward-only
+// pull of the checkout that's there. Runs as the editor user, so the files
+// stay Deightz's. Only ever runs in the workspace's own gateway - the one
+// container (besides its Deightz) that mounts it read/write.
+func ghPull(ctx context.Context, j *jobRun) error {
+	dir, err := j.projectDir()
+	if err != nil {
+		return err
+	}
+	// Public repos pull without a token.
+	tok, _ := githubToken(ctx)
+	g := gitCmd{ctx: ctx, log: j.log, env: gitEnv(tok), editor: true}
+	if present, isGit, head := wsGitState(dir); isGit {
+		j.logf("checkout on %s - fast-forwarding", head)
+		g.pre = []string{"-C", dir}
+		return g.run("pull", "--ff-only", "--no-rebase")
+	} else if present {
+		return fmt.Errorf("%s isn't a git checkout and isn't empty - nothing to pull into", dir)
+	}
+	r, err := ghTarget(j)
+	if err != nil {
+		return err
+	}
+	args := []string{"clone"}
+	if b := j.arg("branch"); b != "" {
+		args = append(args, "--branch", b)
+	}
+	if err := g.run(append(args, "https://github.com/"+r.String()+".git", dir)...); err != nil {
+		return err
+	}
+	ensureExcludes(dir)
+	_, _, head := wsGitState(dir)
+	j.logf("\ncloned %s (%s) into %s", r, head, dir)
+	return nil
+}
+
+// ghPushInPlace commits everything in a GitHub workspace's checkout (minus
+// projectExcludes) and pushes HEAD as `branch`.
+func ghPushInPlace(ctx context.Context, j *jobRun, r ghRepo, branch, login string) error {
+	tok, err := githubToken(ctx)
+	if err != nil {
+		return err
+	}
+	ensureExcludes(j.dir)
+	g := gitCmd{ctx: ctx, log: j.log, env: gitEnv(tok), pre: []string{"-C", j.dir}, editor: true}
+	if err := g.run("add", "--all", "."); err != nil {
+		return err
+	}
+	if _, err := g.out("diff", "--cached", "--quiet"); err != nil {
+		stat, _ := g.out("diff", "--cached", "--stat=120")
+		j.logf("%s", stat)
+		if err := g.run("-c", "user.name="+login, "-c", "user.email="+login+"@users.noreply.github.com",
+			"commit", "--quiet", "-m", "Update from d8z workspace "+j.project); err != nil {
+			return err
+		}
+	} else if n, _ := g.out("rev-list", "--count", "HEAD", "--not", "--remotes"); n == "0" {
+		j.logf("\nNothing to push: no uncommitted changes and every commit is already on GitHub.")
+		return nil
+	}
+	if err := g.run("push", "--quiet", "origin", "HEAD:refs/heads/"+branch); err != nil {
+		return err
+	}
+	j.logf("\nCommitted in the workspace and pushed branch %q to %s.\nOpen a PR with create_pull_request (branch %s), or: https://github.com/%s/compare/%s?expand=1",
+		branch, r, branch, r, url.PathEscape(branch))
+	return nil
+}
+
+// ensureExcludes adds projectExcludes to a checkout's .git/info/exclude, so
+// a workspace commit never picks up .env files or tooling dotfiles.
+func ensureExcludes(dir string) {
+	f := filepath.Join(dir, ".git", "info", "exclude")
+	old, _ := os.ReadFile(f)
+	if strings.Contains(string(old), "# d8z excludes") {
+		return
+	}
+	os.MkdirAll(filepath.Dir(f), 0o755)
+	os.WriteFile(f, append(old, []byte("\n# d8z excludes\n"+projectExcludes)...), 0o644)
+	os.Chown(f, editorUID, editorGID)
 }

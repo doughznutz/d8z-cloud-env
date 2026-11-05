@@ -21,7 +21,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     npm install -g vite
 
 # Go
-ENV GO_VERSION=1.22.3
+ENV GO_VERSION=1.26.10
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tgz && \
     tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
 ENV PATH="/usr/local/go/bin:${PATH}"

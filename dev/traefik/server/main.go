@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +32,14 @@ func main() {
 	cfg := loadConfig()
 	m := NewManager(cfg)
 
+	if m.nats != nil {
+		if err := m.nats.Hello("gw-server " + cfg.ID + " online"); err != nil {
+			log.Printf("nats: hello: %v", err)
+		}
+		m.nats.StartHealthLoop(15*time.Second, nil)
+	}
+	m.startWorkspaceNats()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/self", func(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +50,14 @@ func main() {
 			"id": cfg.ID, "prefix": cfg.Prefix, "role": cfg.Role, "isolated": cfg.Isolated, "dozzlePath": cfg.DozzlePath,
 			"services": cfg.Services, "profiles": profiles, "docker": ver, "dockerOK": err == nil,
 			"localServices": localServices, "localOps": m.LocalOps(), "projectsEnabled": cfg.ProjectsRoot != "",
+			"natsReady": m.nats != nil,
+		}
+		if cfg.WorkspaceName != "" {
+			ws := map[string]any{"name": cfg.WorkspaceName, "assigned": false}
+			if a := m.assignment(); a != nil {
+				ws = map[string]any{"name": a.Name, "source": a.Source, "repo": a.Repo, "assigned": true}
+			}
+			resp["workspace"] = ws
 		}
 		if err != nil {
 			resp["dockerError"] = err.Error()
@@ -118,6 +136,73 @@ func main() {
 		w.Write([]byte(s))
 	})
 
+	// NATS: this gateway's own inbox (always local/self - a descendant's
+	// inbox is read the same way any of its other per-gateway data is, by
+	// talking to its own gw-server through the console's nested iframe), and
+	// sending a message either into our own inbox or straight into a named
+	// child's - a plain publish that crosses its leaf link on its own, same
+	// as the hello/health heartbeat already does.
+	mux.HandleFunc("GET /api/nats/inbox", func(w http.ResponseWriter, r *http.Request) {
+		if m.nats == nil {
+			writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("nats not available"))
+			return
+		}
+		max := 50
+		if v := r.URL.Query().Get("max"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				max = n
+			}
+		}
+		msgs, err := m.nats.Inbox(max)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"messages": msgs})
+	})
+	sendMsg := func(w http.ResponseWriter, r *http.Request, id string) {
+		var req struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if m.nats == nil {
+			writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("nats not available"))
+			return
+		}
+		if err := m.nats.Publish(id, req.Text); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"state": "sent"})
+	}
+	mux.HandleFunc("POST /api/nats/send", func(w http.ResponseWriter, r *http.Request) {
+		sendMsg(w, r, cfg.ID)
+	})
+	mux.HandleFunc("POST /api/gateways/{name}/nats/send", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if !nameRE.MatchString(name) {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("bad name"))
+			return
+		}
+		sendMsg(w, r, m.childID(name))
+	})
+
+	// A workspace gateway's open work (uncommitted / unpushed), asked of it
+	// over NATS - the console shows it before stopping the gateway.
+	mux.HandleFunc("GET /api/gateways/{name}/workspace-status", func(w http.ResponseWriter, r *http.Request) {
+		st, err := m.ChildWorkspaceStatus(r.PathValue("name"))
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write(st)
+	})
+
 	// Local services: start/stop containers in our own compose project
 	// (deightz, the ollama gateway, gopher, the otel collector).
 	mux.HandleFunc("POST /api/services/{svc}/start", func(w http.ResponseWriter, r *http.Request) {
@@ -142,56 +227,7 @@ func main() {
 		writeJSON(w, http.StatusAccepted, map[string]string{"state": "stopping"})
 	})
 
-	// Projects: sibling source trees under GW_PROJECTS_ROOT. Provisioned
-	// (self-template or git clone) and, if they carry their own
-	// docker-compose.yaml, brought up/down directly - no nested gateway.
-	mux.HandleFunc("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
-		ps, err := m.ListProjects(r.Context())
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"projects": ps})
-	})
-	mux.HandleFunc("POST /api/projects", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Name   string        `json:"name"`
-			Source ProjectSource `json:"source"`
-		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		if err := m.CreateProject(req.Name, req.Source); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"name": req.Name, "state": "starting"})
-	})
-	mux.HandleFunc("POST /api/projects/{name}/up", func(w http.ResponseWriter, r *http.Request) {
-		if err := m.StartProject(r.PathValue("name")); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"state": "starting"})
-	})
-	mux.HandleFunc("DELETE /api/projects/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := m.StopProject(r.PathValue("name")); err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"state": "stopping"})
-	})
-	mux.HandleFunc("GET /api/projects/{name}/log", func(w http.ResponseWriter, r *http.Request) {
-		s, ok := m.ProjectLog(r.PathValue("name"))
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write([]byte(s))
-	})
+	registerWorkspaceRoutes(mux, m)
 
 	// Jobs: one-shot actions against external systems (GitHub and Docker
 	// Hub natively, GCP via the dev/cloud container) - no running/stopped

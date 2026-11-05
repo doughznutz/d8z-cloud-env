@@ -99,10 +99,25 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/$USER/projects:/home/$USER/projects
+      # Workspace config: workspace.yaml (holds GitHub tokens) and
+      # .gw-master-key (derives each workspace gateway's key) - kept on the
+      # host, OUTSIDE every repository, so both survive any rebuild. Create
+      # the directory yourself first (mkdir -m 700 ~/.d8z) so it's yours, not
+      # root's; with no workspace.yaml in it the console starts from a
+      # default workspace (this .env's PROJECT) and writes the file on your
+      # first edit. D8Z_CONFIG_DIR moves it elsewhere. The root never mounts
+      # workspace content: each workspace gets its own child gateway that
+      # does (see dev/traefik/server/workspaces.go).
+      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}:/etc/d8z
+      # Embedded NATS JetStream store (dev/traefik/server/nats.go): keeps
+      # this gateway's own messages across container recreation, not just a
+      # process restart. One volume per bundle - bundle/compose.yaml
+      # re-declares the same name so a child gets its own, not this one.
+      - d8z-nats:/var/lib/d8zgw-nats
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8080:80"   # http://localhost:8080 (port 80 itself is reserved elsewhere on this host for now)
+      - "80:80"   # http://localhost:8080 (port 80 itself is reserved elsewhere on this host for now)
     networks:
       internal_net:
       external_net: {}   # internal_net alone is `internal: true` and silently drops the port publish
@@ -197,4 +212,5 @@ volumes:
   gopher-data:
   dind-sock:
   dind-data:
+  d8z-nats:
 
