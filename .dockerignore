@@ -1,5 +1,5 @@
 # Secrets - never bake these into an image, especially ones pushed to a
-# registry. dev/traefik/Dockerfile (and others) COPY the whole build context
+# registry. dev/dood/Dockerfile (and others) COPY the whole build context
 # into /self, so anything listed here stays off disk in every image.
 .env
 .env.*
@@ -10,6 +10,6 @@
 
 .git/
 
-# Build outputs / deps of the traefik console (rebuilt in the image)
+# Build outputs / deps of the dood console (rebuilt in the image)
 **/node_modules
-dev/traefik/console/dist
+dev/dood/console/dist

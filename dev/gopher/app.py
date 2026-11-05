@@ -32,10 +32,10 @@ MAX_HISTORY = 25
 # dev services, reachable by their compose service name on internal_net.
 SEED_TESTS = [
     {
-        "id": "traefik-reachable",
-        "name": "Traefik gateway responds",
+        "id": "dood-reachable",
+        "name": "Dood gateway responds",
         "kind": "http",
-        "host": "traefik",
+        "host": "dood",
         "port": 80,
         "path": "/",
         "method": "GET",
@@ -93,19 +93,6 @@ SEED_TESTS = [
         "method": "GET",
         "timeout_s": 5,
         "expect_status": [200],
-        "expect_contains": "",
-        "enabled": True,
-    },
-    {
-        "id": "otel-otlp-http-open",
-        "name": "OTel collector OTLP/HTTP port open",
-        "kind": "tcp",
-        "host": "otel-collector",
-        "port": 4318,
-        "path": "",
-        "method": "",
-        "timeout_s": 5,
-        "expect_status": [],
         "expect_contains": "",
         "enabled": True,
     },

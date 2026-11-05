@@ -1,5 +1,5 @@
 # Points Continue (extension + `cn` CLI) at the local models served by the
-# og gateway (ollama-gatewai service), reachable at http://og:11434.
+# og gateway (og service), reachable at http://og:11434.
 name: D8Z Ollama Gateway
 version: 0.0.1
 schema: v1
