@@ -10,6 +10,7 @@ import asyncio
 import os
 
 import streamlit as st
+from streamlit.components.v1 import iframe
 
 from server import bus, config, orchestrator
 from server.extractors import REGISTRY
@@ -84,6 +85,16 @@ with docs_tab:
         if files:
             with st.expander(f"{language} ({len(files)} file(s))"):
                 st.code("\n".join(sorted(files)))
+
+    st.divider()
+    st.subheader("Browse docs")
+    # Each language's static doc tree is served by carol's own in-container
+    # Traefik (traefik/dynamic/base.yml), same-origin with this dashboard,
+    # so it can be embedded directly - no new tab, no CORS/framing to work
+    # around.
+    for language in REGISTRY:
+        with st.expander(f"{language} docs", expanded=False):
+            iframe(f"/{config.BASE_PATH}/docs/{language}/", height=600, scrolling=True)
 
 with messages_tab:
     st.caption(

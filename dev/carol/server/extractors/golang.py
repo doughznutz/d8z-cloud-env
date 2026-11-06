@@ -3,10 +3,17 @@
 No extra dependency beyond the Go toolchain itself. A workspace can hold
 several modules (this one does: dev/dood/server is its own go.mod deep
 inside the tree), so every go.mod under source_dir is treated as its own
-module root and documented independently, with `go doc -all <pkg>`'s
-output written to its own text file per package.
+module root and documented independently.
+
+`go doc -all <pkg>`'s plain-text output is wrapped in a minimal static
+HTML page per package - same relative-linked-static-tree shape as pdoc and
+typedoc's own output (see python.py/typescript.py), rather than running a
+live doc server: neither pkgsite nor godoc supports being mounted under a
+URL subpath (both emit root-absolute links), which is exactly where this
+ends up served from (see traefik/dynamic/base.yml).
 """
 
+import html
 import os
 import subprocess
 
@@ -16,6 +23,68 @@ from ..models import ExtractResult, Target
 #: would waste time (and, for node_modules/vendor, duplicate vendored copies
 #: of packages we'd already document from their real home).
 SKIP_DIRS = {".git", "node_modules", "vendor"}
+
+#: Shared inline style for every generated page - no static assets to keep
+#: relative paths working for, since the whole tree only ever has to stay
+#: relocatable under whatever subpath Traefik mounts it at.
+_STYLE = (
+    "body{font-family:system-ui,sans-serif;margin:2rem;color:#1a1a1a}"
+    "pre{white-space:pre-wrap;font-family:ui-monospace,monospace}"
+    "a{color:#0969da}"
+)
+
+
+def _slug(pkg: str) -> str:
+    """Turns an import path into a filesystem-safe, extensionless base name.
+
+    Args:
+        pkg: A package import path, e.g. "example.com/mod/sub".
+
+    Returns:
+        The import path with "/" replaced by "_".
+    """
+    return pkg.replace("/", "_")
+
+
+def _render_doc_page(title: str, doc_text: str) -> str:
+    """Wraps one package's `go doc -all` output in a minimal static HTML page.
+
+    Args:
+        title: Heading for the page (the package's import path).
+        doc_text: Raw stdout from `go doc -all`.
+
+    Returns:
+        A complete, self-contained HTML document.
+    """
+    body = html.escape(doc_text) or "(no doc output)"
+    return (
+        f"<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
+        f"<body><p><a href='index.html'>&larr; index</a></p>"
+        f"<h1>{html.escape(title)}</h1><pre>{body}</pre></body></html>"
+    )
+
+
+def _render_index_page(title: str, back_href: str | None, links: list[tuple[str, str]]) -> str:
+    """Renders a static index page linking to a set of generated pages.
+
+    Args:
+        title: Heading for the page.
+        back_href: Relative link back to a parent index, or None at the top.
+        links: (label, relative href) pairs to list, in order.
+
+    Returns:
+        A complete, self-contained HTML document.
+    """
+    back = f"<p><a href='{html.escape(back_href)}'>&larr; index</a></p>" if back_href else ""
+    items = "".join(
+        f"<li><a href='{html.escape(href)}'>{html.escape(label)}</a></li>" for label, href in links
+    )
+    return (
+        f"<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
+        f"<body>{back}<h1>{html.escape(title)}</h1><ul>{items}</ul></body></html>"
+    )
 
 
 def find_modules(source_dir: str) -> list[str]:
@@ -52,8 +121,9 @@ def extract(source_dir: str, out_dir: str) -> ExtractResult:
 
     Args:
         source_dir: Root of the workspace to search for go.mod files.
-        out_dir: Directory to write one `<package>.txt` file per package into,
-            nested under a subdirectory per module.
+        out_dir: Directory to write one `<package>.html` file per package
+            into, nested under a subdirectory per module, plus an
+            `index.html` per module and one more at `out_dir` itself.
 
     Returns:
         The combined result across all modules and packages found.
@@ -62,7 +132,10 @@ def extract(source_dir: str, out_dir: str) -> ExtractResult:
     if not modules:
         return {"ok": True, "detail": "no go.mod found, nothing to do", "targets": []}
 
+    os.makedirs(out_dir, exist_ok=True)
     targets: list[Target] = []
+    module_links: list[tuple[str, str]] = []
+
     for module_dir in modules:
         module_name = os.path.relpath(module_dir, source_dir)
         try:
@@ -86,20 +159,40 @@ def extract(source_dir: str, out_dir: str) -> ExtractResult:
 
         module_out_dir = os.path.join(out_dir, module_name)
         os.makedirs(module_out_dir, exist_ok=True)
+        package_links: list[tuple[str, str]] = []
         for pkg in [p for p in listed.stdout.splitlines() if p.strip()]:
             doc = subprocess.run(
-                ["go", "doc", "-all", pkg],
+                # -u: this workspace's Go code is internal tools, not
+                # published libraries - most of the interesting logic
+                # lives on unexported methods, which `go doc` otherwise
+                # omits entirely.
+                ["go", "doc", "-all", "-u", pkg],
                 cwd=module_dir,
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
-            out_path = os.path.join(module_out_dir, pkg.replace("/", "_") + ".txt")
+            page_name = _slug(pkg) + ".html"
+            out_path = os.path.join(module_out_dir, page_name)
             with open(out_path, "w") as f:
-                f.write(doc.stdout)
+                f.write(_render_doc_page(pkg, doc.stdout))
+            package_links.append((pkg, page_name))
             targets.append(
                 {"module": module_name, "package": pkg, "ok": doc.returncode == 0, "file": out_path}
             )
+
+        # module_name can itself be several directories deep (e.g.
+        # "dev/dood/server"), so the hop back to out_dir's own index.html
+        # needs one "../" per component, not a single fixed "../".
+        depth = len([s for s in os.path.normpath(module_name).split(os.sep) if s not in ("", ".")])
+        back_href = "../" * depth + "index.html" if depth else "index.html"
+        index_path = os.path.join(module_out_dir, "index.html")
+        with open(index_path, "w") as f:
+            f.write(_render_index_page(module_name, back_href, package_links))
+        module_links.append((module_name, f"{module_name}/index.html"))
+
+    with open(os.path.join(out_dir, "index.html"), "w") as f:
+        f.write(_render_index_page("Go modules", None, module_links))
 
     ok = all(t["ok"] for t in targets) if targets else True
     return {

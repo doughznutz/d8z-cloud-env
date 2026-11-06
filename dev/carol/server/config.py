@@ -12,6 +12,12 @@ SOURCE_DIR: str = os.environ.get("CAROL_SOURCE_DIR", "/source")
 #: Writable volume that generated docs (and run history) are stored under.
 DATA_DIR: str = os.environ.get("CAROL_DATA_DIR", "/data")
 
+#: This dashboard's own mount point behind carol's in-container Traefik
+#: (traefik/dynamic/base.yml) - the same env var entrypoint.sh already
+#: passes Streamlit as --server.baseUrlPath, needed here too so app.py can
+#: build iframe URLs for the per-language doc trees that actually resolve.
+BASE_PATH: str = os.environ.get("CAROL_BASE_PATH", "carol")
+
 #: Where the orchestrator persists run history, under the data volume so it
 #: survives a container restart/rebuild.
 STATE_FILE: str = os.path.join(DATA_DIR, ".carol", "runs.json")
