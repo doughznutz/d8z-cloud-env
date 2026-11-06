@@ -1,0 +1,33 @@
+# golangci-lint config for gw-server. Run by the Dockerfile's lint stage, so a
+# missing doc comment fails the image build.
+#
+#   golangci-lint run ./...
+#
+# godoclint is set to require a doc comment on *every* top-level declaration
+# (funcs, methods, types, consts, vars) - exported or not, tests included -
+# since gw-server is package main and almost nothing in it is exported. Each
+# comment must start with the name it documents, the usual Go convention.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - pkg-doc         # a package comment starts "Package <name>" (or "Command"/"Program" for main)
+        - require-doc     # every top-level declaration has a doc comment
+        - start-with-name # ... which starts with the declaration's name
+      options:
+        require-doc:
+          ignore-exported: false
+          ignore-unexported: false
+        start-with-name:
+          include-unexported: true
+
+issues:
+  # Report every missing comment, not just the first few.
+  max-issues-per-linter: 0
+  max-same-issues: 0

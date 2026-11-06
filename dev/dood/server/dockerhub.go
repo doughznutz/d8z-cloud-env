@@ -21,6 +21,7 @@ import (
 	"strings"
 )
 
+// hubAPI is the Docker Hub API base URL.
 const hubAPI = "https://hub.docker.com"
 
 // hubCreds are the Docker Hub account and token from deployment.yaml
@@ -37,14 +38,16 @@ func (m *Manager) hubCreds() (d *Deployment, user, tok string, err error) {
 	return d, user, tok, nil
 }
 
-// hubSession exchanges the username + access token for a Hub API bearer
-// token (the current /v2/auth/token, falling back to the older
-// /v2/users/login for accounts/tokens that predate it).
+// hubSession is a logged-in Docker Hub API client: the account name and
+// the Authorization header carrying its bearer token.
 type hubSession struct {
 	user string
 	hdr  http.Header
 }
 
+// newHubSession exchanges the username + access token for a Hub API bearer
+// token (the current /v2/auth/token, falling back to the older
+// /v2/users/login for accounts/tokens that predate it).
 func (m *Manager) newHubSession(ctx context.Context) (*hubSession, error) {
 	_, user, tok, err := m.hubCreds()
 	if err != nil {
@@ -71,11 +74,15 @@ func (m *Manager) newHubSession(ctx context.Context) (*hubSession, error) {
 	return &hubSession{user: user, hdr: hdr}, nil
 }
 
+// do makes an authenticated JSON call to the Hub API at path.
 func (s *hubSession) do(ctx context.Context, method, path string, body, out any) error {
 	return doJSON(ctx, method, hubAPI+path, s.hdr, body, out)
 }
 
+// hubRepoRE is a valid Docker Hub namespace or repository name.
 var hubRepoRE = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
+
+// hubTagRE is a valid image tag.
 var hubTagRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 
 // hubRepo is the repository all our images are tags of.
@@ -90,6 +97,8 @@ func hubRepo(j *jobRun) (string, error) {
 	return d.DockerHub.Repository, nil
 }
 
+// dhCheckRepo is the docker/check_repo job: logs whether the repository
+// exists, and if so its visibility, pulls and last update.
 func dhCheckRepo(ctx context.Context, j *jobRun) error {
 	repo, err := hubRepo(j)
 	if err != nil {
@@ -120,6 +129,8 @@ func dhCheckRepo(ctx context.Context, j *jobRun) error {
 	return nil
 }
 
+// dhCreateRepo is the docker/create_repo job: creates the repository with
+// the requested visibility.
 func dhCreateRepo(ctx context.Context, j *jobRun) error {
 	repo, err := hubRepo(j)
 	if err != nil {
@@ -161,6 +172,8 @@ func hubPages[T any](ctx context.Context, s *hubSession, path string, each func(
 	return nil
 }
 
+// dhListRepos is the docker/list_repos job: logs every repository of the
+// account.
 func dhListRepos(ctx context.Context, j *jobRun) error {
 	s, err := j.m.newHubSession(ctx)
 	if err != nil {
@@ -184,6 +197,8 @@ func dhListRepos(ctx context.Context, j *jobRun) error {
 	return err
 }
 
+// dhListTags is the docker/list_tags job: logs every tag of the repository
+// with its size and last update.
 func dhListTags(ctx context.Context, j *jobRun) error {
 	repo, err := hubRepo(j)
 	if err != nil {
@@ -278,6 +293,7 @@ func dhBuild(ctx context.Context, j *jobRun, d *Deployment, images []HubImage) e
 	return dockerStreamHostEnv(ctx, j.log, "", env, args...)
 }
 
+// dhPush pushes the already-built images to their Docker Hub references.
 func dhPush(ctx context.Context, j *jobRun, d *Deployment, images []HubImage) error {
 	return withRegistryLogin(ctx, j, func(env []string) error {
 		for _, im := range images {
@@ -292,6 +308,7 @@ func dhPush(ctx context.Context, j *jobRun, d *Deployment, images []HubImage) er
 	})
 }
 
+// dhBuildJob is the docker/build job.
 func dhBuildJob(ctx context.Context, j *jobRun) error {
 	d, images, err := hubImages(j)
 	if err != nil {
@@ -300,6 +317,7 @@ func dhBuildJob(ctx context.Context, j *jobRun) error {
 	return dhBuild(ctx, j, d, images)
 }
 
+// dhPushJob is the docker/push job.
 func dhPushJob(ctx context.Context, j *jobRun) error {
 	d, images, err := hubImages(j)
 	if err != nil {
@@ -308,6 +326,8 @@ func dhPushJob(ctx context.Context, j *jobRun) error {
 	return dhPush(ctx, j, d, images)
 }
 
+// dhBuildAndPush is the docker/build_and_push job: build, then push only if
+// every build succeeded.
 func dhBuildAndPush(ctx context.Context, j *jobRun) error {
 	d, images, err := hubImages(j)
 	if err != nil {
@@ -319,6 +339,7 @@ func dhBuildAndPush(ctx context.Context, j *jobRun) error {
 	return dhPush(ctx, j, d, images)
 }
 
+// dhPull is the docker/pull job: pulls the images to this daemon.
 func dhPull(ctx context.Context, j *jobRun) error {
 	d, images, err := hubImages(j)
 	if err != nil {

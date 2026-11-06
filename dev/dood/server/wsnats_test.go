@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// TestSealRoundTripAndIsolation checks that each child gets its own stable
+// key, that a sealed assignment opens with that key, and that a sibling's
+// key can't open it.
 func TestSealRoundTripAndIsolation(t *testing.T) {
 	m := &Manager{cfg: Config{WorkspaceFile: filepath.Join(t.TempDir(), "workspace.yaml")}}
 	ka, kb := m.childKey("wsa"), m.childKey("wsb")

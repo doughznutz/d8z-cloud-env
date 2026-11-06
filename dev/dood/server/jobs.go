@@ -39,7 +39,7 @@ type JobSpec struct {
 	UsesProject bool     `json:"-"`                   // reads the selected project's files
 	Workspace   bool     `json:"workspace,omitempty"` // repository work: runs only in a workspace's own gateway
 
-	run func(ctx context.Context, j *jobRun) error
+	run func(ctx context.Context, j *jobRun) error // the job itself; its error is the run's outcome
 }
 
 // jobRun is everything one invocation gets: its log, its resolved args and
@@ -53,6 +53,7 @@ type jobRun struct {
 	dir     string // its path ("" when this gateway has no projects root)
 }
 
+// arg is the resolved value of argument name ("" if it has none).
 func (j *jobRun) arg(name string) string { return j.args[name] }
 
 // projectDir is for jobs that need the project's files on disk.
@@ -66,8 +67,10 @@ func (j *jobRun) projectDir() (string, error) {
 	return j.dir, nil
 }
 
+// logf writes one formatted line to the run's log.
 func (j *jobRun) logf(format string, a ...any) { fmt.Fprintf(j.log, format+"\n", a...) }
 
+// Arguments shared by several jobs in the catalog.
 var (
 	ghRepoArg   = JobArg{Name: "repo", Label: "repo (owner/name)"}
 	ghVisArg    = JobArg{Name: "visibility", Label: "public | private", Fallback: "private"}
@@ -76,6 +79,7 @@ var (
 	cloudTgtArg = JobArg{Name: "target", Label: "target", Required: true, From: "targets"}
 )
 
+// jobs is the job catalog, in the order the console lists it.
 var jobs = []JobSpec{
 	// GitHub (github.go): repository work, so these run only in a
 	// workspace's own gateway (Workspace tab), acting on that workspace with
@@ -124,6 +128,8 @@ var jobs = []JobSpec{
 	{Group: "cloud", Name: "list", Label: "List d8z gateway VMs", run: cloudList},
 }
 
+// resolvedDefault is the arg's value when left blank: its Env variable if
+// set, else its Fallback.
 func (a JobArg) resolvedDefault() string {
 	if a.Env != "" {
 		if v := strings.TrimSpace(os.Getenv(a.Env)); v != "" {
@@ -176,6 +182,7 @@ func (m *Manager) JobCatalog() []JobSpec {
 	return out
 }
 
+// findJob looks up a catalog entry by group and name.
 func findJob(group, name string) (JobSpec, bool) {
 	for _, j := range jobs {
 		if j.Group == group && j.Name == name {
@@ -276,6 +283,7 @@ func (m *Manager) RunJob(group, name, project string, args map[string]string) (s
 	return id, nil
 }
 
+// JobLog is the log of job id ("<group>/<name>"), current or last run.
 func (m *Manager) JobLog(id string) (string, bool) {
 	return m.ProjectLog("job:" + id)
 }

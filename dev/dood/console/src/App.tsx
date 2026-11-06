@@ -1,33 +1,40 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { WorkspacesPage } from "./Workspaces.jsx";
-import { StopConfirm } from "./StopConfirm.jsx";
-import { DeploymentPage } from "./Deployment.jsx";
-import { api } from "./api.js";
-import { Messenger, ParentAndSiblings } from "./Messenger.jsx";
+import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { WorkspacesPage } from "./Workspaces";
+import { StopConfirm } from "./StopConfirm";
+import { DeploymentPage } from "./Deployment";
+import { api } from "./api";
+import { Messenger, ParentAndSiblings } from "./Messenger";
+import { isUp, health } from "./health";
+import { LogView } from "./LogView";
+import type { Gateway, Job, JobRun, Request, Route, Self, ServiceStatus, WorkspaceInfo } from "./types";
 
 // Sub-apps this console knows how to show; which ones appear comes from
 // the gateway's own service list (api/self). `compose` is the bundle
 // service backing it, for health and logs.
-const SERVICES = {
+const SERVICES: Record<string, { ico: string; name: string; desc: string; compose: string }> = {
   deightz: { ico: "⌨", name: "Deightz", desc: "Code-server IDE", compose: "deightz" },
   og: { ico: "✱", name: "OG", desc: "Ollama gateway", compose: "og" },
   gopher: { ico: "✓", name: "Gopher", desc: "Cluster test runner", compose: "gopher" },
+  carol: { ico: "✎", name: "Carol", desc: "Doc generator", compose: "carol" },
   dozzle: { ico: "≡", name: "Dozzle", desc: "Container logs", compose: "dozzle" },
 };
 
 const POLL_MS = 3000;
 const SELF_POLL_MS = 5000;
 
-export const isUp = (s) => s?.state === "running";
-
-// Summarise a bundle's containers: "3/4 up", plus whether anything is down.
-export function health(services) {
-  const list = services || [];
-  const up = list.filter(isUp).length;
-  return { up, total: list.length, degraded: up < list.length };
+/** A sidebar nav entry for one of this bundle's sub-apps. */
+interface ComputedService {
+  id: string;
+  ico: string;
+  name: string;
+  desc: string;
+  compose: string;
+  path: string;
+  status?: ServiceStatus;
 }
 
-function useHash() {
+function useHash(): string {
   const [hash, setHash] = useState(() => location.hash.slice(1));
   useEffect(() => {
     const on = () => setHash(location.hash.slice(1));
@@ -37,11 +44,11 @@ function useHash() {
   return hash;
 }
 
-function useStored(key, initial) {
-  const [v, setV] = useState(() => {
+function useStored<T>(key: string, initial: T): [T, Dispatch<SetStateAction<T>>] {
+  const [v, setV] = useState<T>(() => {
     try {
       const s = localStorage.getItem(key);
-      return s === null ? initial : JSON.parse(s);
+      return s === null ? initial : (JSON.parse(s) as T);
     } catch {
       return initial;
     }
@@ -49,36 +56,39 @@ function useStored(key, initial) {
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(v));
-    } catch {}
+    } catch {
+      // Storage may be unavailable (private browsing, quota); persistence is best-effort.
+    }
   }, [key, v]);
   return [v, setV];
 }
 
-function usePoll(fn, ms) {
+function usePoll(fn: () => void | Promise<void>, ms: number): void {
   useEffect(() => {
-    fn();
+    void fn();
     const t = setInterval(fn, ms);
     return () => clearInterval(t);
   }, [fn, ms]);
 }
 
+/** The console's top-level app shell: sidebar navigation plus the active panel or embedded sub-app. */
 export default function App() {
   const hash = useHash();
-  const [self, setSelf] = useState(null);
-  const [selfErr, setSelfErr] = useState(null);
-  const [gateways, setGateways] = useState([]);
-  const [gwErr, setGwErr] = useState(null);
-  const [wsInfo, setWsInfo] = useState(null);
-  const [wsErr, setWsErr] = useState(null);
-  const [jobsCatalog, setJobsCatalog] = useState([]);
-  const [jobRuns, setJobRuns] = useState({});
+  const [self, setSelf] = useState<Self | null>(null);
+  const [selfErr, setSelfErr] = useState<string | null>(null);
+  const [gateways, setGateways] = useState<Gateway[]>([]);
+  const [gwErr, setGwErr] = useState<string | null>(null);
+  const [wsInfo, setWsInfo] = useState<WorkspaceInfo | null>(null);
+  const [wsErr, setWsErr] = useState<string | null>(null);
+  const [jobsCatalog, setJobsCatalog] = useState<Job[]>([]);
+  const [jobRuns, setJobRuns] = useState<Record<string, JobRun>>({});
 
   const refreshSelf = useCallback(async () => {
     try {
       setSelf(await api.self());
       setSelfErr(null);
     } catch (e) {
-      setSelfErr(e.message);
+      setSelfErr(e instanceof Error ? e.message : String(e));
     }
   }, []);
   usePoll(refreshSelf, SELF_POLL_MS);
@@ -89,7 +99,7 @@ export default function App() {
       setGateways(r.gateways || []);
       setGwErr(r.error || null);
     } catch (e) {
-      setGwErr(e.message);
+      setGwErr(e instanceof Error ? e.message : String(e));
     }
   }, []);
   usePoll(refresh, POLL_MS);
@@ -99,7 +109,7 @@ export default function App() {
       setWsInfo(await api.workspaces());
       setWsErr(null);
     } catch (e) {
-      setWsErr(e.message);
+      setWsErr(e instanceof Error ? e.message : String(e));
     }
   }, []);
   usePoll(refreshWorkspaces, POLL_MS);
@@ -120,29 +130,29 @@ export default function App() {
   }, []);
   usePoll(refreshJobRuns, POLL_MS);
 
-  const services = useMemo(
+  const services = useMemo<ComputedService[]>(
     () =>
       (self?.services || [])
         .filter((s) => SERVICES[s])
         // Only services this bundle actually has: the root profile starts
         // with just dood; deightz comes with the workspace profile (or a
-        // workspace gateway), og/gopher/dozzle on demand from the Control tab.
+        // workspace gateway), og/gopher/carol/dozzle on demand from the Control tab.
         .filter(
           (s) =>
-            (s === "dozzle" && self.dozzlePath) ||
-            self.bundleError ||
-            (self.bundle || []).some((b) => b.service === SERVICES[s].compose)
+            (s === "dozzle" && self?.dozzlePath) ||
+            self?.bundleError ||
+            (self?.bundle || []).some((b) => b.service === SERVICES[s].compose)
         )
         .map((s) => {
           // A host bundle has no dozzle of its own: link the one watching
           // the daemon it shares.
-          const shared = s === "dozzle" && self.dozzlePath;
+          const shared = s === "dozzle" && self?.dozzlePath;
           return {
             id: s,
             ...SERVICES[s],
-            path: shared ? self.dozzlePath : `${s}/`,
+            path: shared ? self.dozzlePath! : `${s}/`,
             desc: shared ? "Shared daemon's logs" : SERVICES[s].desc,
-            status: shared ? undefined : (self.bundle || []).find((b) => b.service === SERVICES[s].compose),
+            status: shared ? undefined : (self?.bundle || []).find((b) => b.service === SERVICES[s].compose),
           };
         }),
     [self]
@@ -151,7 +161,7 @@ export default function App() {
   // Routes: "<service>", "control" (old "status"), "workspaces", "jobs",
   // "gw/<name>", "gw/<name>/info". ("new" - the old New gateway page - now lands on
   // Workspaces, where gateways are started.)
-  const route = useMemo(() => {
+  const route = useMemo<Route>(() => {
     if (hash === "workspaces" || hash === "new") return { kind: "workspaces" };
     if (hash === "jobs") return { kind: "jobs" };
     if (hash === "control" || hash === "status") return { kind: "control" };
@@ -167,12 +177,12 @@ export default function App() {
   const currentSvc = route.kind === "svc" ? services.find((s) => s.id === route.id) : null;
   // A service whose container we can see but isn't running gets a status
   // panel with its logs instead of an iframe full of 502s.
-  const svcDown = currentSvc && currentSvc.status && !isUp(currentSvc.status);
+  const svcDown = !!(currentSvc && currentSvc.status && !isUp(currentSvc.status));
 
   // Iframes stay mounted once visited, so hopping between a child gateway
   // and a service doesn't reload the whole nested cascade.
-  const [visited, setVisited] = useState({});
-  const [reloads, setReloads] = useState({}); // frame key -> reload count
+  const [visited, setVisited] = useState<Record<string, boolean>>({});
+  const [reloads, setReloads] = useState<Record<string, number>>({}); // frame key -> reload count
   const activeFrame =
     route.kind === "svc" && !svcDown
       ? `svc:${route.id}`
@@ -198,7 +208,7 @@ export default function App() {
       .map((g) => ({ key: `gw:${g.name}`, src: g.path, title: `Gateway ${g.name}` })),
   ].filter((f) => visited[f.key]);
 
-  const popout = activeFrame ? frames.find((f) => f.key === activeFrame)?.src : null;
+  const popout = activeFrame ? frames.find((f) => f.key === activeFrame)?.src ?? null : null;
 
   useEffect(() => {
     const label =
@@ -209,10 +219,10 @@ export default function App() {
           : route.kind === "workspaces"
             ? "Workspaces"
             : route.kind === "jobs"
-                  ? "Deployment"
-                  : route.kind === "control"
-                    ? "Control"
-                    : "";
+              ? "Deployment"
+              : route.kind === "control"
+                ? "Control"
+                : "";
     document.title = `D8Z ${self && self.id !== "root" ? `[${self.id}] ` : ""}· ${label}`;
   }, [route, self]);
 
@@ -244,8 +254,8 @@ export default function App() {
                 info={wsInfo}
                 err={wsErr}
                 onChanged={() => {
-                  refreshWorkspaces();
-                  refresh();
+                  void refreshWorkspaces();
+                  void refresh();
                 }}
                 catalog={jobsCatalog}
                 runs={jobRuns}
@@ -254,23 +264,10 @@ export default function App() {
                 gateways={gateways}
               />
             )}
-            {route.kind === "control" && self && (
-              <ControlPage
-                self={self}
-                gateways={gateways}
-                gwErr={gwErr}
-                refreshSelf={refreshSelf}
-              />
-            )}
-            {route.kind === "svc" && svcDown && <ServiceDown svc={currentSvc} />}
+            {route.kind === "control" && self && <ControlPage self={self} gateways={gateways} gwErr={gwErr} refreshSelf={refreshSelf} />}
+            {route.kind === "svc" && svcDown && currentSvc?.status && <ServiceDown svc={{ ...currentSvc, status: currentSvc.status }} />}
             {route.kind === "gw" && <GatewayDetails name={route.name} gw={current} gwErr={gwErr} />}
-            {route.kind === "jobs" && self && (
-              <DeploymentPage
-                catalog={jobsCatalog}
-                runs={jobRuns}
-                onRan={refreshJobRuns}
-              />
-            )}
+            {route.kind === "jobs" && self && <DeploymentPage catalog={jobsCatalog} runs={jobRuns} onRan={refreshJobRuns} />}
             {route.kind === "loading" && !selfErr && <p className="muted">Loading…</p>}
           </div>
         )}
@@ -279,31 +276,33 @@ export default function App() {
   );
 }
 
-function Sidebar({
-  self,
-  services,
-  gateways,
-  wsInfo,
-  route,
-  collapsed,
-  onToggle,
-  popout,
-  refresh,
-  onReload,
-}) {
-  const [confirm, setConfirm] = useState(null);
-  const [err, setErr] = useState(null);
+interface SidebarProps {
+  self: Self | null;
+  services: ComputedService[];
+  gateways: Gateway[];
+  wsInfo: WorkspaceInfo | null;
+  route: Route;
+  collapsed: boolean;
+  onToggle: () => void;
+  popout: string | null;
+  refresh: () => Promise<void>;
+  onReload: (() => void) | null;
+}
+
+function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle, popout, refresh, onReload }: SidebarProps) {
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const own = health(self?.bundle);
 
-  async function stop(name, config) {
+  async function stop(name: string, action: Parameters<typeof api.stop>[1]) {
     setConfirm(null);
     setErr(null);
     try {
-      await api.stop(name, config);
+      await api.stop(name, action);
     } catch (e) {
-      setErr(`${name}: ${e.message}`);
+      setErr(`${name}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    refresh();
+    void refresh();
   }
 
   return (
@@ -331,13 +330,17 @@ function Sidebar({
             <span className="label">
               Control
               <small>
-                {!self
-                  ? "…"
-                  : self.requests?.length
-                    ? <span className="warn-text">{self.requests.length} request{self.requests.length > 1 ? "s" : ""} to review</span>
-                    : self.dockerOK
-                      ? `${self.role} · ${self.id}`
-                      : "docker unreachable"}
+                {!self ? (
+                  "…"
+                ) : self.requests?.length ? (
+                  <span className="warn-text">
+                    {self.requests.length} request{self.requests.length > 1 ? "s" : ""} to review
+                  </span>
+                ) : self.dockerOK ? (
+                  `${self.role} · ${self.id}`
+                ) : (
+                  "docker unreachable"
+                )}
               </small>
             </span>
           </a>
@@ -358,9 +361,7 @@ function Sidebar({
               <span className="ico">{s.ico}</span>
               <span className="label">
                 {s.name}
-                <small className={s.status && !isUp(s.status) ? "error-text" : ""}>
-                  {s.status && !isUp(s.status) ? s.status.status : s.desc}
-                </small>
+                <small className={s.status && !isUp(s.status) ? "error-text" : ""}>{s.status && !isUp(s.status) ? s.status.status : s.desc}</small>
               </span>
               {s.status && <span className={`dot small ${isUp(s.status) ? "running" : s.status.state}`} />}
             </a>
@@ -410,17 +411,13 @@ function Sidebar({
                 <span className="label">
                   {g.workspace || g.name}
                   <small className={g.state === "error" || (g.state === "running" && h.degraded) ? "error-text" : ""}>
-                    {busy
-                      ? g.phase || g.state
-                      : g.state === "error"
-                        ? "failed to start"
-                        : `${g.state} · ${h.up}/${h.total} up · ${g.docker}`}
+                    {busy ? g.phase || g.state : g.state === "error" ? "failed to start" : `${g.state} · ${h.up}/${h.total} up · ${g.docker}`}
                   </small>
                 </span>
               </a>
               {confirm === g.name ? (
                 <div className="confirm label">
-                  <StopConfirm gw={g} compact onStop={(config) => stop(g.name, config)} onKeep={() => setConfirm(null)} />
+                  <StopConfirm gw={g} compact onStop={(action) => stop(g.name, action)} onKeep={() => setConfirm(null)} />
                 </div>
               ) : (
                 <span className="row-actions label">
@@ -466,54 +463,16 @@ function Sidebar({
   );
 }
 
-// LogView fetches text and keeps it fresh while `live`; sticks to the
-// bottom unless the user has scrolled up to read.
-export function LogView({ load, live = true, empty = "No output." }) {
-  const [text, setText] = useState(null);
-  const [err, setErr] = useState(null);
-  const pre = useRef(null);
-  const stick = useRef(true);
-
-  const fetchIt = useCallback(async () => {
-    try {
-      setText(await load());
-      setErr(null);
-    } catch (e) {
-      setErr(e.message);
-    }
-  }, [load]);
-
-  useEffect(() => {
-    fetchIt();
-    if (!live) return;
-    const t = setInterval(fetchIt, 2500);
-    return () => clearInterval(t);
-  }, [fetchIt, live]);
-
-  useEffect(() => {
-    if (pre.current && stick.current) pre.current.scrollTop = pre.current.scrollHeight;
-  }, [text]);
-
-  if (err) return <div className="banner error">{err}</div>;
-  if (text === null) return <p className="muted">Loading…</p>;
-  return (
-    <pre
-      ref={pre}
-      className="log"
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-      }}
-    >
-      {text || empty}
-    </pre>
-  );
+interface ServicesTableProps {
+  services: ServiceStatus[];
+  logsFor: (svc: string) => () => Promise<string>;
+  actions?: (s: ServiceStatus) => ReactNode | null;
 }
 
 // ServicesTable lists a bundle's containers with expandable logs. `actions`,
 // if given, renders extra controls (e.g. start/stop) into a row's head.
-function ServicesTable({ services, logsFor, actions }) {
-  const [open, setOpen] = useState(null);
+function ServicesTable({ services, logsFor, actions }: ServicesTableProps) {
+  const [open, setOpen] = useState<string | null>(null);
   if (!services || services.length === 0) return <p className="muted">No containers yet.</p>;
   return (
     <div className="svc-table">
@@ -537,17 +496,14 @@ function ServicesTable({ services, logsFor, actions }) {
   );
 }
 
-function ControlPage({ self, gateways, gwErr, refreshSelf }) {
-  const logsFor = useCallback((svc) => () => api.serviceLogs(svc), []);
-  const [busy, setBusy] = useState(null);
-  const [err, setErr] = useState(null);
+function ControlPage({ self, gateways, gwErr, refreshSelf }: { self: Self; gateways: Gateway[]; gwErr: string | null; refreshSelf: () => Promise<void> }) {
+  const logsFor = useCallback((svc: string) => () => api.serviceLogs(svc), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const localCatalog = useMemo(
-    () => Object.fromEntries((self.localServices || []).map((s) => [s.name, s])),
-    [self.localServices]
-  );
+  const localCatalog = useMemo(() => Object.fromEntries((self.localServices || []).map((s) => [s.name, s])), [self.localServices]);
   const localOps = self.localOps || {};
-  const bundleRows = useMemo(() => {
+  const bundleRows = useMemo<ServiceStatus[]>(() => {
     const present = new Set((self.bundle || []).map((s) => s.service));
     const missing = Object.keys(localCatalog)
       .filter((n) => !present.has(n))
@@ -555,19 +511,19 @@ function ControlPage({ self, gateways, gwErr, refreshSelf }) {
     return [...(self.bundle || []), ...missing];
   }, [self.bundle, localCatalog]);
 
-  async function toggleLocal(svc, running) {
+  async function toggleLocal(svc: string, running: boolean) {
     setErr(null);
     setBusy(svc);
     try {
       await (running ? api.stopLocal(svc) : api.startLocal(svc));
     } catch (e) {
-      setErr(`${svc}: ${e.message}`);
+      setErr(`${svc}: ${e instanceof Error ? e.message : String(e)}`);
     }
     setBusy(null);
-    refreshSelf();
+    void refreshSelf();
   }
 
-  const localActions = (s) => {
+  const localActions = (s: ServiceStatus) => {
     const svc = localCatalog[s.service];
     if (!svc) return null;
     const op = localOps[s.service];
@@ -576,7 +532,7 @@ function ControlPage({ self, gateways, gwErr, refreshSelf }) {
     return (
       <button
         className={`link-btn ${running ? "stop" : ""}`}
-        disabled={busy === s.service || opBusy}
+        disabled={busy === s.service || !!opBusy}
         onClick={() => toggleLocal(s.service, running)}
         title={op?.error || ""}
       >
@@ -609,11 +565,7 @@ function ControlPage({ self, gateways, gwErr, refreshSelf }) {
         <dt>Runs on</dt>
         <dd>
           {self.isolated ? "its own dind sidecar (isolated bundle)" : "a shared docker daemon"}{" "}
-          {self.dockerOK ? (
-            <span className="muted">(docker {self.docker})</span>
-          ) : (
-            <span className="error-text">unreachable: {self.dockerError}</span>
-          )}
+          {self.dockerOK ? <span className="muted">(docker {self.docker})</span> : <span className="error-text">unreachable: {self.dockerError}</span>}
         </dd>
       </dl>
 
@@ -621,7 +573,7 @@ function ControlPage({ self, gateways, gwErr, refreshSelf }) {
         <>
           <h3>Requests from children</h3>
           <div className="svc-table">
-            {self.requests.map((r) => (
+            {(self.requests ?? []).map((r) => (
               <RequestRow key={r.gateway} req={r} gw={gateways.find((g) => g.name === r.gateway)} onDone={refreshSelf} />
             ))}
           </div>
@@ -668,26 +620,24 @@ function ControlPage({ self, gateways, gwErr, refreshSelf }) {
       <ParentAndSiblings prefix={self.prefix ?? ""} />
       {gateways
         .filter((g) => g.state === "running")
-        .map((g) => (
-          <Messenger key={g.name} base={g.prefix} title={`Child: ${g.workspace ? `${g.workspace} (gw/${g.name})` : `gw/${g.name}`}`} />
-        ))}
+        .map((g) => <Messenger key={g.name} base={g.prefix} title={`Child: ${g.workspace ? `${g.workspace} (gw/${g.name})` : `gw/${g.name}`}`} />)}
     </div>
   );
 }
 
 // A child's request, queued here until you act on it.
-function RequestRow({ req, gw, onDone }) {
+function RequestRow({ req, gw, onDone }: { req: Request; gw: Gateway | undefined; onDone: () => void }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const act = (fn) => async () => {
+  const [err, setErr] = useState<string | null>(null);
+  const act = (fn: () => Promise<unknown>) => async () => {
     setBusy(true);
     setErr(null);
     setConfirm(false);
     try {
       await fn();
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
     setBusy(false);
     onDone();
@@ -701,8 +651,7 @@ function RequestRow({ req, gw, onDone }) {
         </a>
         <span className="tag">{req.kind}</span>
         <span className="svc-status">
-          {req.reason || <span className="muted">no reason given</span>}{" "}
-          <span className="muted">· {new Date(req.time).toLocaleTimeString()}</span>
+          {req.reason || <span className="muted">no reason given</span>} <span className="muted">· {new Date(req.time).toLocaleTimeString()}</span>
         </span>
         {confirm ? (
           <span className="confirm-inline">
@@ -738,9 +687,9 @@ function RequestRow({ req, gw, onDone }) {
 function AskParent() {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
-  const [err, setErr] = useState(null);
-  async function ask(e) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  async function ask(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr(null);
@@ -749,8 +698,8 @@ function AskParent() {
       await api.askParent("restart", reason.trim());
       setMsg("Asked. Approve it on the parent's Control tab when you're ready.");
       setReason("");
-    } catch (e) {
-      setErr(e.message);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
     }
     setBusy(false);
   }
@@ -769,7 +718,7 @@ function AskParent() {
   );
 }
 
-function ServiceDown({ svc }) {
+function ServiceDown({ svc }: { svc: ComputedService & { status: ServiceStatus } }) {
   const load = useCallback(() => api.serviceLogs(svc.compose), [svc.compose]);
   return (
     <div className="panel wide">
@@ -787,10 +736,10 @@ function ServiceDown({ svc }) {
   );
 }
 
-function GatewayDetails({ name, gw, gwErr }) {
+function GatewayDetails({ name, gw, gwErr }: { name: string; gw: Gateway | null | undefined; gwErr: string | null }) {
   const busy = gw?.state === "starting" || gw?.state === "stopping";
   const loadSpawn = useCallback(() => api.log(name), [name]);
-  const logsFor = useCallback((svc) => () => api.childServiceLogs(name, svc), [name]);
+  const logsFor = useCallback((svc: string) => () => api.childServiceLogs(name, svc), [name]);
 
   if (!gw) {
     return (
@@ -823,7 +772,15 @@ function GatewayDetails({ name, gw, gwErr }) {
           <code>{gw.project}</code>
         </dd>
         <dt>Workspace</dt>
-        <dd>{gw.workspace ? <a href="#workspaces"><code>{gw.workspace}</code></a> : <span className="muted">none</span>}</dd>
+        <dd>
+          {gw.workspace ? (
+            <a href="#workspaces">
+              <code>{gw.workspace}</code>
+            </a>
+          ) : (
+            <span className="muted">none</span>
+          )}
+        </dd>
         <dt>Bundle from</dt>
         <dd>{gw.srcProject ? <code>~/projects/{gw.srcProject}</code> : "this repo"}</dd>
         <dt>Prefix</dt>
@@ -849,109 +806,10 @@ function GatewayDetails({ name, gw, gwErr }) {
       </dl>
 
       <h3>Containers</h3>
-      <ServicesTable services={gw.services} logsFor={logsFor} />
+      <ServicesTable services={gw.services || []} logsFor={logsFor} />
 
       <h3>Start / stop log</h3>
-      <LogView load={loadSpawn} live={busy} empty="Nothing logged." />
+      <LogView load={loadSpawn} live={!!busy} empty="Nothing logged." />
     </div>
   );
 }
-
-export function JobRow({ job, run, onRan, project = "" }) {
-  const id = `${job.group}/${job.name}`;
-  const [args, setArgs] = useState({});
-  const [confirm, setConfirm] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const opBusy = run?.state === "starting";
-  const argsOk = (job.args || []).every(
-    (a) => (!a.required || (args[a.name] || "").trim() || a.default) && (!a.choices || a.choices.length > 0)
-  );
-
-  async function fire() {
-    setConfirm(false);
-    setErr(null);
-    try {
-      // Blank args are left out: the server fills in their defaults.
-      const sent = Object.fromEntries(
-        Object.entries(args)
-          .map(([k, v]) => [k, v.trim()])
-          .filter(([, v]) => v)
-      );
-      await api.runJob(job.group, job.name, project, sent);
-      setOpen(true);
-      onRan();
-    } catch (e) {
-      setErr(e.message);
-    }
-  }
-
-  const dot = !run ? null : opBusy ? "starting" : run.state === "error" ? "error" : "running";
-
-  return (
-    <div className="svc-row">
-      <div className="svc-head">
-        {dot && <span className={`dot ${dot}`} />}
-        <code>{job.name}</code>
-        <span className="svc-status muted">{job.label}</span>
-        {(job.args || []).map((a) => {
-          const ph = a.default ? `${a.label || a.name}: ${a.default}` : a.label || a.name;
-          if (a.choices) {
-            return (
-              <select
-                key={a.name}
-                value={args[a.name] || a.default || ""}
-                title={a.label || a.name}
-                disabled={a.choices.length === 0}
-                onChange={(e) => setArgs((x) => ({ ...x, [a.name]: e.target.value }))}
-              >
-                {a.choices.length === 0 && <option value="">no {a.label || a.name}s in deployment.yaml</option>}
-                {a.choices.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            );
-          }
-          return (
-            <input
-              key={a.name}
-              value={args[a.name] || ""}
-              placeholder={ph}
-              title={ph}
-              size={Math.min(28, Math.max(10, ph.length))}
-              onChange={(e) => setArgs((x) => ({ ...x, [a.name]: e.target.value }))}
-            />
-          );
-        })}
-        {confirm ? (
-          <span className="confirm label">
-            <button className="danger" onClick={fire}>
-              Really run
-            </button>
-            <button onClick={() => setConfirm(false)}>Cancel</button>
-          </span>
-        ) : (
-          <button
-            className={`link-btn ${job.dangerous ? "stop" : ""}`}
-            disabled={opBusy || !argsOk}
-            onClick={() => (job.dangerous ? setConfirm(true) : fire())}
-          >
-            {opBusy ? run.phase || run.state : "Run"}
-          </button>
-        )}
-        {run && (
-          <button className="link-btn" onClick={() => setOpen((o) => !o)}>
-            {open ? "Hide log" : "Log"}
-          </button>
-        )}
-      </div>
-      {run?.error && <div className="banner error">{run.error}</div>}
-      {err && <div className="banner error">{err}</div>}
-      {open && run && <LogView load={() => api.jobLog(id)} live={opBusy} empty="Nothing logged." />}
-    </div>
-  );
-}
-

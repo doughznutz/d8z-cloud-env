@@ -1,17 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "./api.js";
+import type { FormEvent } from "react";
+import { api } from "./api";
+import type { InboxMessage } from "./types";
 
-// A compose box + recent-messages feed for one gateway's NATS inbox,
-// reached at `base` (that gateway's own GW_PREFIX - see api.js). Used from
-// the Control tab to talk to a running workspace's gateway, its parent,
-// or its siblings: anywhere in the cascade ordinary Traefik routing
-// reaches, not just this console's own gw-server.
-export function Messenger({ base, title, className }) {
-  const [msgs, setMsgs] = useState(null);
-  const [err, setErr] = useState(null);
+/** Props for {@link Messenger}. */
+export interface MessengerProps {
+  base?: string;
+  title?: string;
+  className?: string;
+}
+
+/**
+ * A compose box + recent-messages feed for one gateway's NATS inbox,
+ * reached at `base` (that gateway's own GW_PREFIX - see api.ts). Used from
+ * the Control tab to talk to a running workspace's gateway, its parent,
+ * or its siblings: anywhere in the cascade ordinary Traefik routing
+ * reaches, not just this console's own gw-server.
+ */
+export function Messenger({ base, title, className }: MessengerProps) {
+  const [msgs, setMsgs] = useState<InboxMessage[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const box = useRef(null);
+  const box = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
 
   const fetchIt = useCallback(async () => {
@@ -20,12 +31,12 @@ export function Messenger({ base, title, className }) {
       setMsgs(r.messages || []);
       setErr(null);
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }, [base]);
 
   useEffect(() => {
-    fetchIt();
+    void fetchIt();
     const t = setInterval(fetchIt, 3000);
     return () => clearInterval(t);
   }, [fetchIt]);
@@ -34,18 +45,18 @@ export function Messenger({ base, title, className }) {
     if (box.current && stick.current) box.current.scrollTop = box.current.scrollHeight;
   }, [msgs]);
 
-  async function send(e) {
+  async function send(e: FormEvent) {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
     setBusy(true);
     setErr(null);
     try {
-      await api.sendMessage(base, t);
+      await api.sendMessage(base ?? "", t);
       setText("");
       await fetchIt();
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
     setBusy(false);
   }
@@ -64,13 +75,13 @@ export function Messenger({ base, title, className }) {
         {msgs === null
           ? "Loading…"
           : msgs.length === 0
-          ? "No messages yet."
-          : msgs.map((m) => (
-              <div key={m.seq}>
-                <span className="muted">{new Date(m.time).toLocaleTimeString()}</span>{" "}
-                <span className="tag">{m.subject.split(".").pop()}</span> {m.data}
-              </div>
-            ))}
+            ? "No messages yet."
+            : msgs.map((m) => (
+                <div key={m.seq}>
+                  <span className="muted">{new Date(m.time).toLocaleTimeString()}</span>{" "}
+                  <span className="tag">{m.subject.split(".").pop()}</span> {m.data}
+                </div>
+              ))}
       </div>
       {err && <div className="banner error">{err}</div>}
       <form className="messenger-compose" onSubmit={send}>
@@ -83,17 +94,24 @@ export function Messenger({ base, title, className }) {
   );
 }
 
-// A workspace gateway's view onto its own parent and running siblings: a
-// gw-<id>'s own GW_PREFIX is always its parent's prefix plus exactly one
-// trailing "/gw/<name>" segment, so the parent's own prefix - and this
-// gateway's name within it - come straight out of this gateway's own
-// prefix, no extra API needed. The root never reaches here (it's never a
-// workspace gateway), so a match always exists in practice.
-export function ParentAndSiblings({ prefix }) {
+/** Props for {@link ParentAndSiblings}. */
+export interface ParentAndSiblingsProps {
+  prefix: string;
+}
+
+/**
+ * A workspace gateway's view onto its own parent and running siblings: a
+ * gw-<id>'s own GW_PREFIX is always its parent's prefix plus exactly one
+ * trailing "/gw/<name>" segment, so the parent's own prefix - and this
+ * gateway's name within it - come straight out of this gateway's own
+ * prefix, no extra API needed. The root never reaches here (it's never a
+ * workspace gateway), so a match always exists in practice.
+ */
+export function ParentAndSiblings({ prefix }: ParentAndSiblingsProps) {
   const m = /^(.*)\/gw\/[a-z0-9]+$/.exec(prefix || "");
   const parentPrefix = m ? m[1] : null;
-  const [gws, setGws] = useState(null);
-  const [err, setErr] = useState(null);
+  const [gws, setGws] = useState<{ prefix: string; name: string; state: string }[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   const fetchIt = useCallback(async () => {
     if (parentPrefix === null) return;
@@ -102,12 +120,12 @@ export function ParentAndSiblings({ prefix }) {
       setGws(r.gateways || []);
       setErr(null);
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }, [parentPrefix]);
 
   useEffect(() => {
-    fetchIt();
+    void fetchIt();
     const t = setInterval(fetchIt, 5000);
     return () => clearInterval(t);
   }, [fetchIt]);

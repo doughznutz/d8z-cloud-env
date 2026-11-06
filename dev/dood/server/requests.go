@@ -24,6 +24,8 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// ParentRequest is one child's pending ask of its parent, waiting on the
+// parent's console for approval or dismissal.
 type ParentRequest struct {
 	Gateway string    `json:"gateway"` // the child's name (our gw/<name>)
 	Kind    string    `json:"kind"`
@@ -31,6 +33,7 @@ type ParentRequest struct {
 	Time    time.Time `json:"time"`
 }
 
+// requestKinds is the set of request kinds a child may send.
 var requestKinds = map[string]string{"restart": "restart"}
 
 // lookupChildSpec is childSpec, swappable in tests (it asks docker).
@@ -57,6 +60,9 @@ func (m *Manager) serveRequests() {
 	}
 }
 
+// queueRequest validates a request from child name (a known kind, from a
+// child that actually exists), stores it as that child's one pending request
+// - replacing any older one - and announces it on our hello subject.
 func (m *Manager) queueRequest(name string, data []byte) error {
 	if !nameRE.MatchString(name) {
 		return errors.New("bad gateway name")
@@ -105,6 +111,7 @@ func (m *Manager) Requests() []ParentRequest {
 	return out
 }
 
+// takeRequest removes and returns child name's pending request.
 func (m *Manager) takeRequest(name string) (*ParentRequest, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -204,6 +211,8 @@ func (m *Manager) AskParent(kind, reason string) error {
 	return nil
 }
 
+// registerRequestRoutes adds the request endpoints: asking our own parent,
+// and listing, approving, or dismissing our children's requests.
 func registerRequestRoutes(mux *http.ServeMux, m *Manager) {
 	// Ours to the parent.
 	mux.HandleFunc("POST /api/parent/requests", func(w http.ResponseWriter, r *http.Request) {

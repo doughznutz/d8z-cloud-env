@@ -1,22 +1,28 @@
-"""Gopher: a small dashboard for defining and running checks against the
-other containers in this cluster. Checks are plain HTTP or raw-TCP probes
-run from inside this container over the compose networks it shares with
-its targets, so hosts/ports are the containers' own service names and
-container ports - nothing needs to be published to the host.
+"""Gopher: a small dashboard for defining and running checks.
+
+Checks run against the other containers in this cluster, as plain HTTP or
+raw-TCP probes from inside this container over the compose networks it
+shares with its targets, so hosts/ports are the containers' own service
+names and container ports - nothing needs to be published to the host.
 
 Tests and their run history are persisted as JSON under /data (a volume),
 so they survive a restart/rebuild of this container.
 """
 
+import asyncio
 import json
 import os
 import socket
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Literal, TypedDict
 
+import nats
 import requests
 import streamlit as st
+from nats.js import JetStreamContext
+from nats.js.errors import NotFoundError
 
 try:
     import docker
@@ -28,9 +34,51 @@ TESTS_FILE = os.path.join(DATA_DIR, "tests.json")
 RESULTS_FILE = os.path.join(DATA_DIR, "results.json")
 MAX_HISTORY = 25
 
+# dood's embedded NATS server (dev/dood/server/nats.go) opens a plain client
+# listener on internal_net alongside its leafnode port - this is that one.
+NATS_URL = os.environ.get("GOPHER_NATS_URL", "nats://dood:4222")
+CHAT_SUBJECT = "chat.lobby"
+CHAT_STREAM = "CHAT"
+CHAT_HISTORY = 50
+
+TestKind = Literal["http", "tcp", "mcp"]
+
+
+class Test(TypedDict):
+    """A single user-defined check against a cluster container."""
+
+    id: str
+    name: str
+    kind: TestKind
+    host: str
+    port: int
+    path: str
+    method: str
+    timeout_s: int
+    expect_status: list[int]
+    expect_contains: str
+    enabled: bool
+
+
+class RunOutcome(TypedDict):
+    """The pass/fail verdict of a single probe, before it's timestamped."""
+
+    ok: bool
+    latency_ms: float
+    detail: str
+
+
+class CheckResult(RunOutcome):
+    """A :class:`RunOutcome` plus the UTC time the probe ran, as stored in history."""
+
+    ts: str
+
+
+ResultsStore = dict[str, list[CheckResult]]
+
 # Seeded on first boot only - a handful of checks against this project's own
 # dev services, reachable by their compose service name on internal_net.
-SEED_TESTS = [
+SEED_TESTS: list[Test] = [
     {
         "id": "dood-reachable",
         "name": "Dood gateway responds",
@@ -99,14 +147,32 @@ SEED_TESTS = [
 ]
 
 
-def load_json(path, default):
+def load_json(path: str, default: Any) -> Any:
+    """Load JSON from ``path``, or return ``default`` if it doesn't exist yet.
+
+    Args:
+        path: Absolute path to the JSON file.
+        default: Value to return when the file is missing.
+
+    Returns:
+        The parsed JSON content, or ``default``.
+    """
     if not os.path.exists(path):
         return default
     with open(path) as f:
         return json.load(f)
 
 
-def save_json(path, data):
+def save_json(path: str, data: Any) -> None:
+    """Write ``data`` to ``path`` as JSON, atomically.
+
+    Writes to a temp file in the same directory first and ``os.replace``s it
+    into place, so a crash mid-write can't leave a truncated/corrupt file.
+
+    Args:
+        path: Absolute path to write to.
+        data: JSON-serializable value to persist.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
@@ -114,7 +180,12 @@ def save_json(path, data):
     os.replace(tmp, path)
 
 
-def load_tests():
+def load_tests() -> list[Test]:
+    """Load the saved test definitions, seeding defaults on first boot.
+
+    Returns:
+        The list of defined tests (never ``None``).
+    """
     tests = load_json(TESTS_FILE, None)
     if tests is None:
         tests = [dict(t) for t in SEED_TESTS]
@@ -122,17 +193,33 @@ def load_tests():
     return tests
 
 
-def load_results():
+def load_results() -> ResultsStore:
+    """Load saved run history, keyed by test id.
+
+    Returns:
+        A mapping of test id to its list of past :class:`CheckResult`.
+    """
     return load_json(RESULTS_FILE, {})
 
 
-def run_http(test):
+def run_http(test: Test) -> RunOutcome:
+    """Run an HTTP check: request the test's path and judge the response.
+
+    A test with no ``expect_status`` just needs the request to not raise
+    (i.e. "reachable, whatever it says"); one with ``expect_status`` also
+    requires the response code to be in that list, and one with
+    ``expect_contains`` additionally requires that substring in the body.
+
+    Args:
+        test: The HTTP test to run.
+
+    Returns:
+        The outcome of the probe.
+    """
     url = f"http://{test['host']}:{test['port']}{test.get('path') or '/'}"
     t0 = time.monotonic()
     try:
-        resp = requests.request(
-            test.get("method") or "GET", url, timeout=test.get("timeout_s", 5)
-        )
+        resp = requests.request(test.get("method") or "GET", url, timeout=test.get("timeout_s", 5))
         latency_ms = round((time.monotonic() - t0) * 1000, 1)
         expect = test.get("expect_status") or []
         ok = (resp.status_code in expect) if expect else True
@@ -144,40 +231,165 @@ def run_http(test):
                 detail += " (response missing expected text)"
         return {"ok": ok, "latency_ms": latency_ms, "detail": detail}
     except requests.RequestException as e:
-        return {"ok": False, "latency_ms": round((time.monotonic() - t0) * 1000, 1), "detail": str(e)}
+        return {
+            "ok": False,
+            "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+            "detail": str(e),
+        }
 
 
-def run_tcp(test):
+def run_tcp(test: Test) -> RunOutcome:
+    """Run a TCP check: succeed if a connection to host:port can be opened.
+
+    Args:
+        test: The TCP test to run.
+
+    Returns:
+        The outcome of the probe.
+    """
     t0 = time.monotonic()
     try:
-        with socket.create_connection((test["host"], test["port"]), timeout=test.get("timeout_s", 5)):
+        with socket.create_connection(
+            (test["host"], test["port"]), timeout=test.get("timeout_s", 5)
+        ):
             pass
-        return {"ok": True, "latency_ms": round((time.monotonic() - t0) * 1000, 1), "detail": "connected"}
+        return {
+            "ok": True,
+            "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+            "detail": "connected",
+        }
     except OSError as e:
-        return {"ok": False, "latency_ms": round((time.monotonic() - t0) * 1000, 1), "detail": str(e)}
+        return {
+            "ok": False,
+            "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+            "detail": str(e),
+        }
 
 
-def run_test(test):
+def run_test(test: Test) -> CheckResult:
+    """Dispatch ``test`` to its kind's runner and stamp the result with a time.
+
+    Args:
+        test: The test to run.
+
+    Returns:
+        The timestamped result of the probe.
+    """
     if test["kind"] == "http":
         result = run_http(test)
     elif test["kind"] == "tcp":
         result = run_tcp(test)
     else:
-        result = {"ok": False, "latency_ms": 0.0, "detail": f"{test['kind']} checks aren't wired up yet"}
-    result["ts"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    return result
+        result = {
+            "ok": False,
+            "latency_ms": 0.0,
+            "detail": f"{test['kind']} checks aren't wired up yet",
+        }
+    return {**result, "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
-def record_result(results, test_id, result):
+def record_result(results: ResultsStore, test_id: str, result: CheckResult) -> None:
+    """Append ``result`` to ``test_id``'s history, trim it, and persist it.
+
+    Args:
+        results: The full results store, updated in place.
+        test_id: Id of the test this result belongs to.
+        result: The result to record.
+    """
     hist = results.setdefault(test_id, [])
     hist.append(result)
     del hist[:-MAX_HISTORY]
     save_json(RESULTS_FILE, results)
 
 
+class ChatMessage(TypedDict):
+    """One chat message, as read back from the CHAT stream."""
+
+    seq: int
+    sender: str
+    text: str
+    ts: str
+
+
+async def _ensure_chat_stream(js: JetStreamContext) -> None:
+    """Create the CHAT stream (capturing ``chat.>``) if it doesn't exist yet.
+
+    Args:
+        js: An open JetStream context.
+    """
+    try:
+        await js.stream_info(CHAT_STREAM)
+    except NotFoundError:
+        await js.add_stream(name=CHAT_STREAM, subjects=["chat.>"])
+
+
+async def fetch_chat_history(max_msgs: int) -> list[ChatMessage]:
+    """Connect to NATS and return up to ``max_msgs`` recent chat messages.
+
+    Args:
+        max_msgs: The most messages to return, oldest first.
+
+    Returns:
+        The chat history, oldest first.
+    """
+    nc = await nats.connect(NATS_URL, connect_timeout=5)
+    try:
+        js = nc.jetstream()
+        await _ensure_chat_stream(js)
+        info = await js.stream_info(CHAT_STREAM)
+        out: list[ChatMessage] = []
+        if info.state.messages == 0:
+            return out
+        start = info.state.first_seq
+        if info.state.last_seq - start + 1 > max_msgs:
+            start = info.state.last_seq - max_msgs + 1
+        for seq in range(start, info.state.last_seq + 1):
+            try:
+                raw = await js.get_msg(CHAT_STREAM, seq=seq)
+            except NotFoundError:
+                continue  # purged/deleted sequence
+            if raw.seq is None or raw.data is None:
+                continue  # malformed/empty response, shouldn't happen in practice
+            payload = json.loads(raw.data)
+            out.append(
+                {
+                    "seq": raw.seq,
+                    "sender": payload.get("sender", "?"),
+                    "text": payload.get("text", ""),
+                    "ts": payload.get("ts", ""),
+                }
+            )
+        return out
+    finally:
+        await nc.close()
+
+
+async def send_chat_message(sender: str, text: str) -> None:
+    """Connect to NATS and publish one chat message.
+
+    Args:
+        sender: Display name to attribute the message to.
+        text: The message body.
+    """
+    nc = await nats.connect(NATS_URL, connect_timeout=5)
+    try:
+        payload = {
+            "sender": sender,
+            "text": text,
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        await nc.publish(CHAT_SUBJECT, json.dumps(payload).encode())
+        await nc.flush(timeout=2)
+    finally:
+        await nc.close()
+
+
 st.set_page_config(page_title="Gopher", layout="wide")
 st.title("Gopher — cluster test runner")
-st.caption("Enumerate the cluster's containers, define HTTP/TCP checks against them, and run/track the results.")
+st.caption(
+    "Enumerate the cluster's containers, define HTTP/TCP checks against them, "
+    "and run/track the results."
+)
 
 if "tests" not in st.session_state:
     st.session_state.tests = load_tests()
@@ -187,7 +399,9 @@ if "results" not in st.session_state:
 tests = st.session_state.tests
 results = st.session_state.results
 
-run_tab, define_tab, targets_tab = st.tabs(["Run tests", "Define tests", "Targets"])
+run_tab, define_tab, targets_tab, chat_tab = st.tabs(
+    ["Run tests", "Define tests", "Targets", "Chat"]
+)
 
 with run_tab:
     if not tests:
@@ -205,7 +419,8 @@ with run_tab:
             last = hist[-1] if hist else None
             c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 3, 1])
             where = f"{t['kind']} {t['host']}:{t['port']}{t.get('path') or ''}"
-            c1.markdown(f"**{t['name']}**  \n`{where}`" + ("" if t.get("enabled", True) else " _(disabled)_"))
+            disabled_note = "" if t.get("enabled", True) else " _(disabled)_"
+            c1.markdown(f"**{t['name']}**  \n`{where}`" + disabled_note)
             if last:
                 c2.write("🟢 pass" if last["ok"] else "🔴 fail")
                 c3.write(f"{last['latency_ms']} ms")
@@ -247,8 +462,12 @@ with define_tab:
             if not name or not host:
                 st.error("Name and host are required.")
             elif kind == "mcp":
-                st.error("MCP checks aren't wired up yet — there's no MCP endpoint in the cluster to test against.")
+                st.error(
+                    "MCP checks aren't wired up yet — there's no MCP endpoint "
+                    "in the cluster to test against."
+                )
             else:
+                codes: list[int] | None
                 try:
                     codes = [int(s) for s in expect_status.split(",") if s.strip()]
                 except ValueError:
@@ -320,3 +539,42 @@ with targets_tab:
                 st.info("No containers visible.")
         except Exception as e:
             st.error(f"Can't reach the Docker socket: {e}")
+
+with chat_tab:
+    st.caption(
+        f"A chat room over dood's embedded NATS server ({NATS_URL}, subject "
+        f"`{CHAT_SUBJECT}`) - see dev/dood/server/nats.go. Anything else that "
+        "publishes there shows up here too."
+    )
+    if "chat_name" not in st.session_state:
+        st.session_state.chat_name = os.environ.get("HOSTNAME", "gopher")
+    st.text_input("Your name", key="chat_name")
+
+    try:
+        chat_messages = asyncio.run(fetch_chat_history(CHAT_HISTORY))
+        chat_error = None
+    except Exception as e:
+        chat_messages = []
+        chat_error = str(e)
+
+    if chat_error:
+        st.error(f"Can't reach NATS at {NATS_URL}: {chat_error}")
+    elif not chat_messages:
+        st.info("No messages yet — say hello.")
+    else:
+        for m in chat_messages:
+            st.markdown(f"**{m['sender']}** _{m['ts']}_  \n{m['text']}")
+
+    with st.form("chat_send", clear_on_submit=True):
+        chat_text = st.text_input("Message")
+        chat_submitted = st.form_submit_button("Send")
+        if chat_submitted and chat_text.strip():
+            try:
+                sender = st.session_state.chat_name or "gopher"
+                asyncio.run(send_chat_message(sender, chat_text.strip()))
+                st.rerun()
+            except Exception as e:
+                st.error(f"Send failed: {e}")
+
+    if st.button("Refresh", key="chat_refresh"):
+        st.rerun()

@@ -18,6 +18,7 @@ import (
 	"time"
 )
 
+// writeJSON sends v as an uncached JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -25,10 +26,15 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// writeErr sends err as a JSON {"error": ...} body with the given status code.
 func writeErr(w http.ResponseWriter, code int, err error) {
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
 
+// main loads the config, brings up the Manager (and its NATS hub), registers
+// every /api route plus the console's static files, starts the reconcile loop
+// that keeps Traefik routes in sync with running children, and serves HTTP on
+// cfg.Listen under cfg.Prefix.
 func main() {
 	cfg := loadConfig()
 	m := NewManager(cfg)
@@ -208,7 +214,7 @@ func main() {
 	})
 
 	// Local services: start/stop containers in our own compose project
-	// (deightz and the optional og / gopher / dozzle).
+	// (deightz and the optional og / gopher / carol / dozzle).
 	mux.HandleFunc("POST /api/services/{svc}/start", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Project string `json:"project"`

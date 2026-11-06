@@ -1,0 +1,24 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F/I: pycodestyle + pyflakes + import sorting.
+# D: pydocstyle - enforces that every module/class/function carries a
+#    docstring, so a later doc-extraction tool has something to read.
+select = ["E", "F", "I", "D"]
+# D203/D213 conflict with the D211/D212 pair the "google" convention below
+# already picks; D104 (missing docstring in __init__.py) doesn't apply here.
+ignore = ["D203", "D213", "D104"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# streamlit, requests' runtime module, and docker ship without (or Gopher
+# doesn't install) type stubs - don't fail the build over third-party gaps.
+ignore_missing_imports = true

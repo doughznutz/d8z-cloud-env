@@ -38,10 +38,10 @@ import (
 // is the whole file (Value is its parsed tree, or Raw its bytes).
 type cfgOp struct {
 	File  string   `json:"file"`
-	Path  []string `json:"path,omitempty"` // map keys, or "[name]" for a named list entry
-	Op    string   `json:"op"`             // set | remove
-	Value any      `json:"value,omitempty"`
-	Raw   []byte   `json:"raw,omitempty"`
+	Path  []string `json:"path,omitempty"`  // map keys, or "[name]" for a named list entry
+	Op    string   `json:"op"`              // set | remove
+	Value any      `json:"value,omitempty"` // the new value, for a set in a YAML file
+	Raw   []byte   `json:"raw,omitempty"`   // the new bytes, for a set of a whole non-YAML file
 }
 
 // summary is the op without its value (values can be secrets).
@@ -53,9 +53,13 @@ func (o cfgOp) summary() string {
 	return o.Op + " " + p
 }
 
+// cfgMu serializes reads and writes of the config dir and its base copy.
 var cfgMu sync.Mutex
 
-func (m *Manager) cfgDir() string  { return filepath.Dir(m.cfg.DeploymentFile) }
+// cfgDir is this gateway's config dir (the one deployment.yaml is in).
+func (m *Manager) cfgDir() string { return filepath.Dir(m.cfg.DeploymentFile) }
+
+// baseDir holds the config our parent last gave us, to diff our own against.
 func (m *Manager) baseDir() string { return filepath.Join(m.cfgDir(), ".base") }
 
 // isCfgFile says whether a path (relative to a config dir) is config that
@@ -70,6 +74,8 @@ func isCfgFile(rel string) bool {
 	return !strings.HasPrefix(rel, ".") && !strings.HasSuffix(rel, ".state.json") && !strings.HasSuffix(rel, ".tmp")
 }
 
+// readCfgFiles reads every config file in dir (see isCfgFile), keyed by
+// slash-separated path relative to dir. A missing dir is an empty set.
 func readCfgFiles(dir string) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	for _, sub := range []string{"", "branches"} {
@@ -120,10 +126,13 @@ func writeCfgFiles(dir string, files map[string][]byte) error {
 	return nil
 }
 
+// isTreeFile says whether a config file is YAML, and so diffed per value
+// rather than whole.
 func isTreeFile(rel string) bool {
 	return strings.HasSuffix(rel, ".yaml") || strings.HasSuffix(rel, ".yml")
 }
 
+// parseTree parses YAML into generic maps, lists and scalars.
 func parseTree(b []byte) (any, error) {
 	var v any
 	if err := yaml.Unmarshal(b, &v); err != nil {
@@ -134,6 +143,9 @@ func parseTree(b []byte) (any, error) {
 
 // --- diff -------------------------------------------------------------------
 
+// diffCfg is the ops that turn the base file set into own, in file order:
+// a removed file is one remove, a non-YAML or new file one whole-file set,
+// and a changed YAML file is diffed per value (diffNode).
 func diffCfg(base, own map[string][]byte) ([]cfgOp, error) {
 	var ops []cfgOp
 	names := map[string]bool{}
@@ -173,6 +185,9 @@ func diffCfg(base, own map[string][]byte) ([]cfgOp, error) {
 	return ops, nil
 }
 
+// diffNode appends to ops the changes from tree a to tree b at path in
+// file. Maps and named lists are recursed into key by key; anything else
+// that differs is one set of b's value.
 func diffNode(ops []cfgOp, file string, path []string, a, b any) []cfgOp {
 	at := func(k string) []string { return append(append([]string{}, path...), k) }
 	if ma, ok := a.(map[string]any); ok {
@@ -255,6 +270,7 @@ func namedList(v any) (map[string]any, bool) {
 	return out, true
 }
 
+// sortedKeys is m's keys in sorted order, so diffs are deterministic.
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -316,6 +332,9 @@ func applyCfg(files map[string][]byte, ops []cfgOp) (map[string][]byte, error) {
 	return out, nil
 }
 
+// applyAt returns a copy of node with op applied at path. A "[name]"
+// segment addresses a named list entry, created if missing on a set; any
+// other segment is a map key. Inputs are never mutated.
 func applyAt(node any, path []string, op string, val any) (any, error) {
 	if len(path) == 0 {
 		if op == "remove" {
@@ -424,6 +443,8 @@ func (m *Manager) configGift() (map[string][]byte, map[string]string, error) {
 	return files, env, nil
 }
 
+// collectEnvRefs walks a tree for "*token_env" keys and adds each named
+// variable's value from our environment (when set) to env.
 func collectEnvRefs(v any, env map[string]string) {
 	switch t := v.(type) {
 	case map[string]any:
@@ -532,12 +553,16 @@ type Branch struct {
 	Changes []string  `json:"changes"` // Ops, without values
 }
 
+// branchIDRE is what a branch id may look like (it becomes a file name).
 var branchIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
+// branchFile is where branch id is saved.
 func (m *Manager) branchFile(id string) string {
 	return filepath.Join(m.cfgDir(), "branches", id+".json")
 }
 
+// saveBranch saves child from's config changes as a new branch, named
+// "<from>-<UTC time>", and returns its id.
 func (m *Manager) saveBranch(from string, ops []cfgOp) (string, error) {
 	now := time.Now().UTC()
 	id := from + "-" + now.Format("20060102-150405")
@@ -553,6 +578,7 @@ func (m *Manager) saveBranch(from string, ops []cfgOp) (string, error) {
 	return id, nil
 }
 
+// loadBranch reads saved branch id, values included.
 func (m *Manager) loadBranch(id string) (*Branch, error) {
 	if !branchIDRE.MatchString(id) {
 		return nil, fmt.Errorf("bad branch id")
@@ -568,6 +594,7 @@ func (m *Manager) loadBranch(id string) (*Branch, error) {
 	return &b, nil
 }
 
+// listBranches is every saved branch, newest first, without its Ops.
 func (m *Manager) listBranches() []Branch {
 	out := []Branch{}
 	entries, _ := os.ReadDir(filepath.Join(m.cfgDir(), "branches"))
@@ -585,6 +612,7 @@ func (m *Manager) listBranches() []Branch {
 	return out
 }
 
+// deleteBranch removes saved branch id and tells our children.
 func (m *Manager) deleteBranch(id string) error {
 	if _, err := m.loadBranch(id); err != nil {
 		return err
@@ -596,6 +624,7 @@ func (m *Manager) deleteBranch(id string) error {
 	return nil
 }
 
+// cfgNotify records whether a configChanged notice is already scheduled.
 var cfgNotify struct {
 	sync.Mutex
 	pending bool

@@ -16,21 +16,26 @@ import (
 // bringing bundles up, so the rest of the daemon traffic goes through it
 // too: one client, honouring DOCKER_HOST, no SDK dependency.
 
+// Container labels a gateway puts on (and reads back from) its children's
+// containers. Labels are the source of truth for what a child is: they
+// survive restarts of either side, with no state file to keep in sync.
 const (
-	labelParent     = "d8z.gw.parent"
-	labelID         = "d8z.gw.id"
-	labelName       = "d8z.gw.name"
-	labelPrefix     = "d8z.gw.prefix"
-	labelDocker     = "d8z.gw.docker"
-	labelProfiles   = "d8z.gw.profiles"
-	labelEntry      = "d8z.gw.entry"      // the container the parent routes to
-	labelSrcProject = "d8z.gw.srcproject" // sibling project the bundle was spawned from ("" = this repo)
-	labelWorkspace  = "d8z.gw.workspace"  // workspace the gateway serves ("" = none: a plain bundle)
-	labelBranch     = "d8z.gw.branch"     // saved config branch it was started from ("" = none)
-	labelProject    = "com.docker.compose.project"
-	labelService    = "com.docker.compose.service"
+	labelParent     = "d8z.gw.parent"              // GW_ID of the gateway that spawned it
+	labelID         = "d8z.gw.id"                  // its own GW_ID
+	labelName       = "d8z.gw.name"                // its name under the parent (gw/<name>)
+	labelPrefix     = "d8z.gw.prefix"              // external URL prefix it is mounted at
+	labelDocker     = "d8z.gw.docker"              // host | dind
+	labelProfiles   = "d8z.gw.profiles"            // comma-separated bundle profiles
+	labelEntry      = "d8z.gw.entry"               // the container the parent routes to
+	labelSrcProject = "d8z.gw.srcproject"          // sibling project the bundle was spawned from ("" = this repo)
+	labelWorkspace  = "d8z.gw.workspace"           // workspace the gateway serves ("" = none: a plain bundle)
+	labelBranch     = "d8z.gw.branch"              // saved config branch it was started from ("" = none)
+	labelProject    = "com.docker.compose.project" // set by compose
+	labelService    = "com.docker.compose.service" // set by compose
 )
 
+// dockerOut runs the docker CLI and returns its combined, trimmed output.
+// On failure the error carries the command line and that output.
 func dockerOut(ctx context.Context, args ...string) (string, error) {
 	var buf bytes.Buffer
 	cmd := exec.CommandContext(ctx, "docker", args...)
@@ -81,6 +86,7 @@ func dockerStreamHostEnv(ctx context.Context, w io.Writer, host string, extraEnv
 	return nil
 }
 
+// container is the subset of `docker inspect` output gw-server reads.
 type container struct {
 	ID    string `json:"Id"`
 	Name  string `json:"Name"`
@@ -98,8 +104,10 @@ type container struct {
 	} `json:"NetworkSettings"`
 }
 
+// name is the container's name without docker's leading "/".
 func (c container) name() string { return strings.TrimPrefix(c.Name, "/") }
 
+// inspect runs `docker inspect` on ids (nil for none).
 func inspect(ctx context.Context, ids []string) ([]container, error) {
 	if len(ids) == 0 {
 		return nil, nil

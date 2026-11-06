@@ -26,12 +26,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// deploymentFileHeader is written at the top of every deployment.yaml we save.
 const deploymentFileHeader = `# D8Z deployment - managed by the gateway console (Deployment tab).
 # What this gateway builds and ships (named images, one tag each in one
 # Docker Hub repository) and where it runs them (cloud targets).
 # Can hold the Docker Hub token: keep it outside every repository.
 `
 
+// deployMu serializes read-modify-write of deployment.yaml.
 var deployMu sync.Mutex
 
 // updateDeployment applies fn to the file as written, validates the result
@@ -60,6 +62,7 @@ func (m *Manager) updateDeployment(fn func(d *Deployment) error) error {
 
 // ---- inputs ----
 
+// hubInput is the Docker Hub form as the console submits it.
 type hubInput struct {
 	Username   string `json:"username"`
 	Repository string `json:"repository"`
@@ -68,6 +71,7 @@ type hubInput struct {
 	ClearToken bool   `json:"clearToken"` // drop the stored token
 }
 
+// gcpInput is the GCP form as the console submits it.
 type gcpInput struct {
 	Project     string `json:"project"`
 	Zone        string `json:"zone"`
@@ -76,6 +80,7 @@ type gcpInput struct {
 	ClearKey    bool   `json:"clearKey"`    // delete the key file
 }
 
+// trimAll trims every string in ss and drops the empty ones (never nil).
 func trimAll(ss []string) []string {
 	out := []string{}
 	for _, s := range ss {
@@ -86,6 +91,8 @@ func trimAll(ss []string) []string {
 	return out
 }
 
+// editDockerHub saves the docker_hub account settings. The stored token is
+// replaced only by a non-empty new one, or cleared on request.
 func (m *Manager) editDockerHub(in hubInput) error {
 	return m.updateDeployment(func(d *Deployment) error {
 		h := &d.DockerHub
@@ -102,8 +109,9 @@ func (m *Manager) editDockerHub(in hubInput) error {
 	})
 }
 
-// Images: name is the tag. Adding the first one to a file that had none
-// keeps the defaults it was showing.
+// putImage adds an image (oldName "") or replaces image oldName. The name
+// is the tag. Adding the first one to a file that had none keeps the
+// defaults it was showing; renaming one moves the targets that run it along.
 func (m *Manager) putImage(oldName string, im HubImage) error {
 	im.Name, im.Service = strings.TrimSpace(im.Name), strings.TrimSpace(im.Service)
 	return m.updateDeployment(func(d *Deployment) error {
@@ -136,6 +144,8 @@ func (m *Manager) putImage(oldName string, im HubImage) error {
 	})
 }
 
+// removeImage drops an image, refusing while a target runs it or if it is
+// the last one.
 func (m *Manager) removeImage(name string) error {
 	return m.updateDeployment(func(d *Deployment) error {
 		if len(d.DockerHub.Images) == 0 {
@@ -186,6 +196,8 @@ func checkGCPKey(b []byte) (string, error) {
 	return key.ClientEmail, nil
 }
 
+// editGCP saves the gcp settings and, when given, validates and writes a new
+// service-account key file (or deletes the old one on request).
 func (m *Manager) editGCP(in gcpInput) error {
 	creds := firstNonEmpty(strings.TrimSpace(in.Credentials), "gcp-sa.json")
 	var key []byte
@@ -220,6 +232,8 @@ func (m *Manager) editGCP(in gcpInput) error {
 	return nil
 }
 
+// putTarget adds a target (oldName "") or replaces target oldName. A target
+// that still has a VM can't be renamed: the VM is named after it.
 func (m *Manager) putTarget(oldName string, t CloudTarget) error {
 	t.Name = strings.TrimSpace(t.Name)
 	t.MachineType = strings.TrimSpace(t.MachineType)
@@ -252,6 +266,7 @@ func (m *Manager) putTarget(oldName string, t CloudTarget) error {
 	})
 }
 
+// removeTarget drops a target, refusing while it still has a VM.
 func (m *Manager) removeTarget(name string) error {
 	if st, ok := m.loadCloudState()[name]; ok && st.Instance != "" {
 		return fmt.Errorf("%s still has a VM (%s, %s): run cloud/delete first", name, st.Instance, st.Status)
@@ -273,14 +288,15 @@ func (m *Manager) removeTarget(name string) error {
 
 // ---- helpers for the forms ----
 
-// dhServices are the docker-compose.yaml services in the dh profile (what an
-// image can be built by), from the project's live checkout. Cached briefly.
+// dhCache holds dhServices' last answer and when it was taken.
 var dhCache struct {
 	sync.Mutex
 	at   time.Time
 	list []string
 }
 
+// dhServices are the docker-compose.yaml services in the dh profile (what an
+// image can be built by), from the project's live checkout. Cached briefly.
 func (m *Manager) dhServices(ctx context.Context) []string {
 	dhCache.Lock()
 	defer dhCache.Unlock()
@@ -320,19 +336,23 @@ func (m *Manager) dhServices(ctx context.Context) []string {
 	return list
 }
 
+// fileExists reports whether f can be stat'ed.
 func fileExists(f string) bool {
 	_, err := os.Stat(f)
 	return err == nil
 }
 
-// publicIP is this gateway's address as the internet sees it - what a
-// target's allow_from needs so we can reach (and NATS-dial) the VM.
+// ipCache holds publicIP's last answer and when it was taken.
 var ipCache struct {
 	sync.Mutex
 	at time.Time
 	ip string
 }
 
+// publicIP is this gateway's address as the internet sees it - what a
+// target's allow_from needs so we can reach (and NATS-dial) the VM. Cached
+// for 10 minutes; on a lookup failure the last known address (or "") is
+// returned.
 func publicIP(ctx context.Context) string {
 	ipCache.Lock()
 	defer ipCache.Unlock()
@@ -406,6 +426,9 @@ func (m *Manager) hubRepoStatus(ctx context.Context) (map[string]any, error) {
 
 // ---- HTTP ----
 
+// registerDeploymentEditRoutes adds the Deployment tab's edit endpoints:
+// Docker Hub settings and repository status, images, GCP settings, and
+// targets.
 func registerDeploymentEditRoutes(mux *http.ServeMux, m *Manager) {
 	decode := func(w http.ResponseWriter, r *http.Request, v any) bool {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(v); err != nil {

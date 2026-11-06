@@ -52,10 +52,13 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// ctlSubject is gateway id's control subject for verb, e.g.
+// ctlSubject("abc-xyz", "assign") -> "ctl.abc.xyz.assign".
 func ctlSubject(id, verb string) string { return "ctl." + natsSubjectID(id) + "." + verb }
 
 // --- keys and sealing --------------------------------------------------------
 
+// masterKeyOnce holds the master key, loaded or created once per process.
 var masterKeyOnce struct {
 	sync.Once
 	key []byte
@@ -100,6 +103,7 @@ func (m *Manager) childKey(id string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// gcmFor builds an AES-256-GCM cipher from a hex-encoded 32-byte key.
 func gcmFor(keyHex string) (cipher.AEAD, error) {
 	k, err := hex.DecodeString(keyHex)
 	if err != nil || len(k) != 32 {
@@ -112,6 +116,7 @@ func gcmFor(keyHex string) (cipher.AEAD, error) {
 	return cipher.NewGCM(blk)
 }
 
+// seal encrypts plain with keyHex and returns base64(nonce || ciphertext).
 func seal(keyHex string, plain []byte) (string, error) {
 	g, err := gcmFor(keyHex)
 	if err != nil {
@@ -122,6 +127,7 @@ func seal(keyHex string, plain []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(g.Seal(nonce, nonce, plain, nil)), nil
 }
 
+// unseal reverses seal, failing if the key is wrong or the data was altered.
 func unseal(keyHex, sealed string) ([]byte, error) {
 	g, err := gcmFor(keyHex)
 	if err != nil {
@@ -134,6 +140,8 @@ func unseal(keyHex, sealed string) ([]byte, error) {
 	return g.Open(nil, b[:g.NonceSize()], b[g.NonceSize():], nil)
 }
 
+// assignReply is the wire reply to an assign or config.diff request: either
+// a sealed payload or an error.
 type assignReply struct {
 	Sealed string `json:"sealed,omitempty"` // the assignGift, sealed with its key
 	Error  string `json:"error,omitempty"`
@@ -169,6 +177,8 @@ func (m *Manager) serveAssignments() {
 	}
 }
 
+// answerAssignment builds child name's assignGift (its workspace, our
+// config, and the branch it started from) and seals it with that child's key.
 func (m *Manager) answerAssignment(ctx context.Context, name string) assignReply {
 	if !nameRE.MatchString(name) {
 		return assignReply{Error: "bad gateway name"}
@@ -343,6 +353,11 @@ func (m *Manager) runChild() {
 	}
 }
 
+// fetchAssignment asks the parent for our assignGift, applies its config,
+// and - in a workspace gateway - stores the workspace assignment and
+// prepares its directory. first is true for the initial fetch after start:
+// that one announces itself in full and pulls an empty workspace; later ones
+// pass the refresh on to our own children.
 func (m *Manager) fetchAssignment(first bool) error {
 	msg, err := m.nats.nc.Request(ctlSubject(m.cfg.ID, "assign"), nil, 3*time.Second)
 	if err != nil {
@@ -403,6 +418,7 @@ func (m *Manager) fetchAssignment(first bool) error {
 	return nil
 }
 
+// firstNonEmpty returns the first non-empty string in s, or "".
 func firstNonEmpty(s ...string) string {
 	for _, v := range s {
 		if v != "" {
@@ -430,6 +446,9 @@ type wsStatus struct {
 	Error     string   `json:"error,omitempty"`
 }
 
+// workspaceStatus gathers this gateway's open work - config changes and,
+// in a workspace gateway, uncommitted, untracked and unpushed git work - to
+// answer the parent's status request.
 func (m *Manager) workspaceStatus(ctx context.Context) wsStatus {
 	st := wsStatus{Workspace: m.cfg.WorkspaceName, Persists: true, Config: []string{}}
 	if ops, err := m.configDiff(); err != nil {
