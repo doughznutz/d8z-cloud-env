@@ -1,19 +1,15 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { JobRow } from "./JobRow";
 import { health } from "./health";
 import { StopConfirm } from "./StopConfirm";
-import type { Branch, EditingKey, Gateway, GatewaySelf, Job, JobRun, OwnWorkspace, Profile, Workspace, WorkspaceInfo } from "./types";
+import type { Branch, EditingKey, Gateway, GatewaySelf, OwnWorkspace, Profile, Workspace, WorkspaceInfo } from "./types";
 
 /** Props for {@link WorkspacesPage}. */
 export interface WorkspacesPageProps {
   info: WorkspaceInfo | null;
   err: string | null;
   onChanged: () => void;
-  catalog: Job[];
-  runs: Record<string, JobRun>;
-  onRan: () => void;
   self: GatewaySelf | null;
   gateways: Gateway[];
 }
@@ -25,7 +21,7 @@ export interface WorkspacesPageProps {
  *   - the workspaces it manages (its own workspace.yaml), one gateway each;
  *   - ad hoc child gateways, on its own workspace or none.
  */
-export function WorkspacesPage({ info, err, onChanged, catalog, runs, onRan, self, gateways }: WorkspacesPageProps) {
+export function WorkspacesPage({ info, err, onChanged, self, gateways }: WorkspacesPageProps) {
   if (err)
     return (
       <div className="panel wide">
@@ -38,7 +34,7 @@ export function WorkspacesPage({ info, err, onChanged, catalog, runs, onRan, sel
   return (
     <>
       {info.own?.pending && <WorkspacePending name={info.own.name} />}
-      {own && <WorkspaceRepo ws={own} catalog={catalog} runs={runs} onRan={onRan} />}
+      {own && <WorkspaceRepo ws={own} />}
       <WorkspaceManager info={info} profiles={self?.profiles || []} onChanged={onChanged} />
       <ChildGateways own={own} self={self} gateways={(gateways || []).filter((g) => !managed.has(g.name))} onChanged={onChanged} />
     </>
@@ -425,11 +421,7 @@ function WorkspaceForm({
 }
 
 // A workspace gateway's own view of its workspace: the repository tools.
-function WorkspaceRepo({ ws, catalog, runs, onRan }: { ws: OwnWorkspace; catalog: Job[]; runs: Record<string, JobRun>; onRan: () => void }) {
-  const jobs = (catalog || []).filter((j) => j.workspace);
-  const first = ["pull", "diff_repo", "push_branch", "create_pull_request"];
-  const main = first.map((n) => jobs.find((j) => j.name === n)).filter((j): j is Job => !!j);
-  const more = jobs.filter((j) => !first.includes(j.name));
+function WorkspaceRepo({ ws }: { ws: OwnWorkspace }) {
   return (
     <div className="panel wide">
       <h2>
@@ -466,24 +458,9 @@ function WorkspaceRepo({ ws, catalog, runs, onRan }: { ws: OwnWorkspace; catalog
           : "It's pushed from a snapshot: your local directory and its git history are never written."}
       </p>
       <p className="muted">
-        Messages to this gateway, its parent and its siblings are on the <a href="#control">Control</a> tab.
+        Messages to this gateway, its parent and its siblings, and its GitHub jobs (pull, diff, push, pull requests),
+        are on the <a href="#control">Control</a> tab.
       </p>
-      <h3>GitHub</h3>
-      <div className="svc-table">
-        {main.map((j) => (
-          <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
-        ))}
-      </div>
-      {more.length > 0 && (
-        <>
-          <h3>More</h3>
-          <div className="svc-table">
-            {more.map((j) => (
-              <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 }

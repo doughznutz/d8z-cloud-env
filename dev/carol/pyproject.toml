@@ -26,7 +26,8 @@ no_implicit_optional = true
 
 # Streamlit ships without type stubs (or a py.typed marker); nothing we can
 # do about that short of vendoring stubs, so it's the one import left
-# unchecked.
+# unchecked. "streamlit.*" (not just "streamlit") so submodule imports like
+# streamlit.components.v1 are covered too.
 [[tool.mypy.overrides]]
-module = "streamlit"
+module = "streamlit.*"
 ignore_missing_imports = true

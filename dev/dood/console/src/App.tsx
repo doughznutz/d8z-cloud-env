@@ -5,6 +5,7 @@ import { StopConfirm } from "./StopConfirm";
 import { DeploymentPage } from "./Deployment";
 import { api } from "./api";
 import { Messenger, ParentAndSiblings } from "./Messenger";
+import { JobRow } from "./JobRow";
 import { isUp, health } from "./health";
 import { LogView } from "./LogView";
 import type { Gateway, Job, JobRun, Request, Route, Self, ServiceStatus, WorkspaceInfo } from "./types";
@@ -257,14 +258,21 @@ export default function App() {
                   void refreshWorkspaces();
                   void refresh();
                 }}
-                catalog={jobsCatalog}
-                runs={jobRuns}
-                onRan={refreshJobRuns}
                 self={self}
                 gateways={gateways}
               />
             )}
-            {route.kind === "control" && self && <ControlPage self={self} gateways={gateways} gwErr={gwErr} refreshSelf={refreshSelf} />}
+            {route.kind === "control" && self && (
+              <ControlPage
+                self={self}
+                gateways={gateways}
+                gwErr={gwErr}
+                refreshSelf={refreshSelf}
+                catalog={jobsCatalog}
+                runs={jobRuns}
+                onRan={refreshJobRuns}
+              />
+            )}
             {route.kind === "svc" && svcDown && currentSvc?.status && <ServiceDown svc={{ ...currentSvc, status: currentSvc.status }} />}
             {route.kind === "gw" && <GatewayDetails name={route.name} gw={current} gwErr={gwErr} />}
             {route.kind === "jobs" && self && <DeploymentPage catalog={jobsCatalog} runs={jobRuns} onRan={refreshJobRuns} />}
@@ -496,10 +504,31 @@ function ServicesTable({ services, logsFor, actions }: ServicesTableProps) {
   );
 }
 
-function ControlPage({ self, gateways, gwErr, refreshSelf }: { self: Self; gateways: Gateway[]; gwErr: string | null; refreshSelf: () => Promise<void> }) {
+function ControlPage({
+  self,
+  gateways,
+  gwErr,
+  refreshSelf,
+  catalog,
+  runs,
+  onRan,
+}: {
+  self: Self;
+  gateways: Gateway[];
+  gwErr: string | null;
+  refreshSelf: () => Promise<void>;
+  catalog: Job[];
+  runs: Record<string, JobRun>;
+  onRan: () => void;
+}) {
   const logsFor = useCallback((svc: string) => () => api.serviceLogs(svc), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  const wsJobs = useMemo(() => (catalog || []).filter((j) => j.workspace), [catalog]);
+  const first = ["pull", "diff_repo", "push_branch", "create_pull_request"];
+  const mainJobs = first.map((n) => wsJobs.find((j) => j.name === n)).filter((j): j is Job => !!j);
+  const moreJobs = wsJobs.filter((j) => !first.includes(j.name));
 
   const localCatalog = useMemo(() => Object.fromEntries((self.localServices || []).map((s) => [s.name, s])), [self.localServices]);
   const localOps = self.localOps || {};
@@ -611,6 +640,27 @@ function ControlPage({ self, gateways, gwErr, refreshSelf }: { self: Self; gatew
             );
           })}
         </div>
+      )}
+
+      {self.workspace && wsJobs.length > 0 && (
+        <>
+          <h3>GitHub</h3>
+          <div className="svc-table">
+            {mainJobs.map((j) => (
+              <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
+            ))}
+          </div>
+          {moreJobs.length > 0 && (
+            <>
+              <h3>More</h3>
+              <div className="svc-table">
+                {moreJobs.map((j) => (
+                  <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
+                ))}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {self.role !== "root" && <AskParent />}

@@ -44,6 +44,11 @@ RUN black --check .
 RUN ruff check .
 RUN mypy app.py server
 
+# Just the static binary - carol's own toolchains (go/node/python) still
+# come from `base`, so this never becomes the image's base like it is for
+# dood (dev/dood/Dockerfile), which has no such toolchains to keep.
+FROM traefik:v3.1 AS traefik_bin
+
 # ==============================================================================
 # Stage 3: final runtime image.
 # ==============================================================================
@@ -56,7 +61,13 @@ COPY --from=lint /app /app
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Streamlit dashboard.
+# Traefik fronts everything on this one port: the Streamlit dashboard and
+# a static server per language's generated doc tree (see
+# traefik/dynamic/base.yml) - all behind the same port this image has
+# always exposed, so dood's own routing (dev/dood/dynamic/base.yml, which
+# points at http://carol:8503 unconditionally) needs no changes.
+COPY --from=traefik_bin /usr/local/bin/traefik /usr/local/bin/traefik
+COPY traefik/ /etc/traefik/
 EXPOSE 8503
 
 ENTRYPOINT ["/app/entrypoint.sh"]
