@@ -26,7 +26,7 @@ http:
     # Sub-apps use relative asset URLs, so `/deightz` must become `/deightz/`.
     add-trailing-slash:
       redirectRegex:
-        regex: '^(https?://[^/]+{{ $p }}/(deightz|og|dozzle|gopher|gw/[a-z0-9]+))$'
+        regex: '^(https?://[^/]+{{ $p }}/(deightz|og|dozzle|gopher|carol|gw/[a-z0-9]+))$'
         replacement: "${1}/"
         permanent: true
     deightz-strip:
@@ -61,6 +61,11 @@ http:
       entryPoints: [web]
       middlewares: [gw-guard, add-trailing-slash]
       service: gopher
+    carol:
+      rule: 'Path(`{{ $p }}/carol`) || PathPrefix(`{{ $p }}/carol/`)'
+      entryPoints: [web]
+      middlewares: [gw-guard, add-trailing-slash]
+      service: carol
 
   services:
     console:
@@ -83,3 +88,7 @@ http:
       loadBalancer:
         servers:
           - url: "http://gopher:8502"
+    carol:
+      loadBalancer:
+        servers:
+          - url: "http://carol:8503"

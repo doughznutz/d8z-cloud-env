@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// testKeyJSON is a freshly generated, valid GCP service-account key file.
 func testKeyJSON(t *testing.T) string {
 	k, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -25,6 +26,9 @@ func testKeyJSON(t *testing.T) string {
 	return string(b)
 }
 
+// TestDeploymentEdits exercises the Deployment tab's edits: a write-only
+// Docker Hub token, adding and renaming images, no defaults baked into the
+// file, GCP key validation, and protecting targets that have a VM.
 func TestDeploymentEdits(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOCKER_HUB_USERNAME", "alice")

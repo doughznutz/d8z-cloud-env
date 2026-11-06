@@ -27,13 +27,15 @@ type Config struct {
 	DeploymentFile  string   // deployment.yaml (Docker Hub images, cloud targets; holds keys - same place)
 	WorkspaceName   string   // set in a workspace gateway: the workspace it serves (details arrive over NATS)
 	WorkspaceKey    string   // its per-gateway key: unseals the assignment its parent sends
-	Listen          string
-	NatsLeafPort    int    // leafnode listener, reachable by our parent once it attaches to our gwlink
-	NatsStoreDir    string // JetStream store, backed by a named volume so it survives container recreation
-	NatsLeafUser    string // leafnode auth, set when the leaf port is reachable from outside (a cloud gateway)
-	NatsLeafPass    string
+	Listen          string   // address gw-server's HTTP server binds to (Traefik proxies to it)
+	NatsLeafPort    int      // leafnode listener, reachable by our parent once it attaches to our gwlink
+	NatsStoreDir    string   // JetStream store, backed by a named volume so it survives container recreation
+	NatsLeafUser    string   // leafnode auth, set when the leaf port is reachable from outside (a cloud gateway)
+	NatsLeafPass    string   // password paired with NatsLeafUser
+	NatsClientPort  int      // plain client listener, for ordinary NATS clients on internal_net (e.g. gopher)
 }
 
+// getenv returns the environment variable k, or def when it is unset or empty.
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -41,6 +43,8 @@ func getenv(k, def string) string {
 	return def
 }
 
+// getenvInt returns the environment variable k parsed as an int, or def when
+// it is unset, empty, or not a number.
 func getenvInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -50,6 +54,8 @@ func getenvInt(k string, def int) int {
 	return def
 }
 
+// loadConfig builds the Config from GW_* environment variables, filling in
+// the in-container defaults for anything unset.
 func loadConfig() Config {
 	c := Config{
 		ID:              getenv("GW_ID", "root"),
@@ -73,8 +79,9 @@ func loadConfig() Config {
 		NatsStoreDir:    getenv("GW_NATS_STORE_DIR", "/var/lib/d8zgw-nats"),
 		NatsLeafUser:    os.Getenv("GW_NATS_LEAF_USER"),
 		NatsLeafPass:    os.Getenv("GW_NATS_LEAF_PASSWORD"),
+		NatsClientPort:  getenvInt("GW_NATS_CLIENT_PORT", 4222),
 	}
-	for _, s := range strings.Split(getenv("GW_SERVICES", "deightz,og,gopher,dozzle"), ",") {
+	for _, s := range strings.Split(getenv("GW_SERVICES", "deightz,og,gopher,carol,dozzle"), ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			c.Services = append(c.Services, s)
 		}
@@ -82,8 +89,8 @@ func loadConfig() Config {
 	return c
 }
 
-// Bundle profiles a child can be started with. UI says whether it gets a
-// sidebar entry. There are no dependencies between them, with one rule:
+// Profile is one of the bundle profiles a child can be started with. UI says
+// whether it gets a sidebar entry. There are no dependencies between them, with one rule:
 // one dozzle per docker daemon. A dind bundle is a new daemon, so it always
 // gets one; a host bundle shares its parent's daemon (and its dozzle), so
 // it never does.
@@ -93,10 +100,12 @@ type Profile struct {
 	UI    bool   `json:"ui"`
 }
 
+// profiles is every bundle profile, in canonical order.
 var profiles = []Profile{
 	{Name: "deightz", Label: "Deightz IDE", UI: true},
 	{Name: "og", Label: "Ollama gateway", UI: true},
 	{Name: "gopher", Label: "Gopher test runner", UI: true},
+	{Name: "carol", Label: "Carol doc generator", UI: true},
 	{Name: "dozzle", Label: "Dozzle logs", UI: true},
 }
 
@@ -118,6 +127,7 @@ func resolveProfiles(req []string, docker string) []string {
 	return out
 }
 
+// allProfileNames lists every profile name, in canonical order.
 func allProfileNames() []string {
 	out := make([]string, len(profiles))
 	for i, p := range profiles {
@@ -126,6 +136,7 @@ func allProfileNames() []string {
 	return out
 }
 
+// uiServices keeps the profiles in profs that get a console sidebar entry.
 func uiServices(profs []string) []string {
 	var out []string
 	for _, n := range profs {

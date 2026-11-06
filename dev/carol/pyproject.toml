@@ -1,0 +1,32 @@
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F: pyflakes/pycodestyle correctness. I: import sort. D: docstrings
+# present (this is what the Dockerfile's lint stage enforces "comments in
+# place" with). ANN: function signatures fully typed.
+select = ["E", "F", "I", "D", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+# Streamlit ships without type stubs (or a py.typed marker); nothing we can
+# do about that short of vendoring stubs, so it's the one import left
+# unchecked.
+[[tool.mypy.overrides]]
+module = "streamlit"
+ignore_missing_imports = true

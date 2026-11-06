@@ -1,15 +1,37 @@
+import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { api } from "./api.js";
-import { JobRow, health } from "./App.jsx";
-import { StopConfirm } from "./StopConfirm.jsx";
+import { api } from "./api";
+import { JobRow } from "./JobRow";
+import { health } from "./health";
+import { StopConfirm } from "./StopConfirm";
+import type { Branch, EditingKey, Gateway, GatewaySelf, Job, JobRun, OwnWorkspace, Profile, Workspace, WorkspaceInfo } from "./types";
 
-// The Workspaces tab - the same on every gateway, root or not:
-//   - the workspace this gateway serves itself, if its parent gave it one:
-//     the one place with it mounted read/write, so pull / diff / push / PRs;
-//   - the workspaces it manages (its own workspace.yaml), one gateway each;
-//   - ad hoc child gateways, on its own workspace or none.
-export function WorkspacesPage({ info, err, onChanged, catalog, runs, onRan, self, gateways }) {
-  if (err) return <div className="panel wide"><div className="banner error">Can't load workspaces: {err}</div></div>;
+/** Props for {@link WorkspacesPage}. */
+export interface WorkspacesPageProps {
+  info: WorkspaceInfo | null;
+  err: string | null;
+  onChanged: () => void;
+  catalog: Job[];
+  runs: Record<string, JobRun>;
+  onRan: () => void;
+  self: GatewaySelf | null;
+  gateways: Gateway[];
+}
+
+/**
+ * The Workspaces tab - the same on every gateway, root or not:
+ *   - the workspace this gateway serves itself, if its parent gave it one:
+ *     the one place with it mounted read/write, so pull / diff / push / PRs;
+ *   - the workspaces it manages (its own workspace.yaml), one gateway each;
+ *   - ad hoc child gateways, on its own workspace or none.
+ */
+export function WorkspacesPage({ info, err, onChanged, catalog, runs, onRan, self, gateways }: WorkspacesPageProps) {
+  if (err)
+    return (
+      <div className="panel wide">
+        <div className="banner error">Can't load workspaces: {err}</div>
+      </div>
+    );
   if (!info) return <p className="muted">Loading…</p>;
   const own = info.own && !info.own.pending ? info.own : null;
   const managed = new Set((info.workspaces || []).map((w) => w.gateway));
@@ -18,18 +40,13 @@ export function WorkspacesPage({ info, err, onChanged, catalog, runs, onRan, sel
       {info.own?.pending && <WorkspacePending name={info.own.name} />}
       {own && <WorkspaceRepo ws={own} catalog={catalog} runs={runs} onRan={onRan} />}
       <WorkspaceManager info={info} profiles={self?.profiles || []} onChanged={onChanged} />
-      <ChildGateways
-        own={own}
-        self={self}
-        gateways={(gateways || []).filter((g) => !managed.has(g.name))}
-        onChanged={onChanged}
-      />
+      <ChildGateways own={own} self={self} gateways={(gateways || []).filter((g) => !managed.has(g.name))} onChanged={onChanged} />
     </>
   );
 }
 
-function WorkspaceManager({ info, profiles, onChanged }) {
-  const [editing, setEditing] = useState(null); // null | "new" | workspace name
+function WorkspaceManager({ info, profiles, onChanged }: { info: WorkspaceInfo; profiles: Profile[]; onChanged: () => void }) {
+  const [editing, setEditing] = useState<EditingKey>(null);
   const list = info.workspaces || [];
   const editWs = editing && editing !== "new" ? list.find((w) => w.name === editing) : null;
 
@@ -71,7 +88,7 @@ function WorkspaceManager({ info, profiles, onChanged }) {
       {editing !== null && (
         <WorkspaceForm
           key={editing}
-          ws={editWs}
+          ws={editWs ?? null}
           dirs={info.dirs || []}
           profiles={profiles}
           onDone={() => {
@@ -85,21 +102,21 @@ function WorkspaceManager({ info, profiles, onChanged }) {
   );
 }
 
-function WorkspaceRow({ ws, onChanged, onEdit }) {
+function WorkspaceRow({ ws, onChanged, onEdit }: { ws: Workspace; onChanged: () => void; onEdit: () => void }) {
   const gw = ws.gw;
-  const [confirm, setConfirm] = useState(null); // "stop" | "remove"
+  const [confirm, setConfirm] = useState<"stop" | "remove" | null>(null);
   const [purge, setPurge] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const act = (fn) => async () => {
+  const act = (fn: () => Promise<unknown>) => async () => {
     setErr(null);
     setBusy(true);
     setConfirm(null);
     try {
       await fn();
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
     setBusy(false);
     onChanged();
@@ -107,7 +124,7 @@ function WorkspaceRow({ ws, onChanged, onEdit }) {
 
   const h = gw ? health(gw.services) : null;
   const gwBusy = gw && (gw.state === "starting" || gw.state === "stopping");
-  const dot = !gw ? "" : gw.state === "running" && h.degraded ? "degraded" : gw.state;
+  const dot = !gw ? "" : gw.state === "running" && h?.degraded ? "degraded" : gw.state;
   const where =
     ws.source === "github" ? (
       <>
@@ -133,7 +150,7 @@ function WorkspaceRow({ ws, onChanged, onEdit }) {
           {where}
           <span className={ws.tokenSet ? "muted" : "warn-text"}>
             {" "}
-            · {ws.tokenSet ? `token ✓${ws.tokenEnv && !ws.token ? ` (${ws.tokenEnv})` : ""}` : "no token"}
+            · {ws.tokenSet ? `token ✓${ws.tokenEnv ? ` (${ws.tokenEnv})` : ""}` : "no token"}
           </span>
         </span>
         <button className="link-btn" onClick={onEdit} disabled={busy}>
@@ -168,17 +185,17 @@ function WorkspaceRow({ ws, onChanged, onEdit }) {
         {gw ? (
           <>
             <span className={`svc-status ${gw.state === "error" || (h && h.degraded) ? "error-text" : "muted"}`}>
-              {gwBusy && <span className="spinner inline" />} {gw.phase || gw.error || `${gw.state} · ${h.up}/${h.total} up · ${gw.docker}`}
+              {gwBusy && <span className="spinner inline" />} {gw.phase || gw.error || `${gw.state} · ${h?.up}/${h?.total} up · ${gw.docker}`}
             </span>
             {gw.state === "running" && <a href={`#gw/${gw.name}`}>Open →</a>}
             <a href={`#gw/${gw.name}/info`}>Details</a>
-            {confirm === "stop" ? null : (
-              gw.state !== "stopping" && (
-                <button className="link-btn stop" disabled={busy} onClick={() => setConfirm("stop")}>
-                  Stop
-                </button>
-              )
-            )}
+            {confirm === "stop"
+              ? null
+              : gw.state !== "stopping" && (
+                  <button className="link-btn stop" disabled={busy} onClick={() => setConfirm("stop")}>
+                    Stop
+                  </button>
+                )}
           </>
         ) : (
           <>
@@ -194,7 +211,7 @@ function WorkspaceRow({ ws, onChanged, onEdit }) {
       </div>
       {gw && confirm === "stop" && (
         <div className="ws-stop">
-          <StopConfirm gw={gw} onStop={(config) => act(() => api.stop(gw.name, config))()} onKeep={() => setConfirm(null)} />
+          <StopConfirm gw={gw} onStop={(action) => act(() => api.stop(gw.name, action))()} onKeep={() => setConfirm(null)} />
         </div>
       )}
       {err && <div className="banner error">{err}</div>}
@@ -202,7 +219,19 @@ function WorkspaceRow({ ws, onChanged, onEdit }) {
   );
 }
 
-function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
+function WorkspaceForm({
+  ws,
+  dirs,
+  profiles,
+  onDone,
+  onCancel,
+}: {
+  ws: Workspace | null;
+  dirs: string[];
+  profiles: Profile[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
   const isNew = !ws;
   const [f, setF] = useState(() => ({
     name: ws?.name || "",
@@ -211,30 +240,32 @@ function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
     branch: ws?.branch || "",
     path: ws?.path || "",
     tokenEnv: ws?.tokenEnv || "",
-    gateway: ws?.gateway && ws.gateway !== ws?.name?.replace(/[^a-z0-9]/g, "") ? ws.gateway : "",
+    gateway: ws?.gateway && ws.gateway !== ws.name.replace(/[^a-z0-9]/g, "") ? ws.gateway : "",
     token: "",
     clearToken: false,
     services: ws?.services || ["deightz"],
     docker: ws?.docker || "host",
   }));
-  const toggleSvc = (n) =>
+  const toggleSvc = (n: string) =>
     setF((x) => ({ ...x, services: x.services.includes(n) ? x.services.filter((s) => s !== n) : [...x.services, n] }));
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: "name" | "branch" | "token" | "tokenEnv" | "gateway") => (e: ChangeEvent<HTMLInputElement>) =>
+    setF((x) => ({ ...x, [k]: e.target.value }));
+  const setClearToken = (e: ChangeEvent<HTMLInputElement>) => setF((x) => ({ ...x, clearToken: e.target.checked }));
 
   // A local workspace named after its directory unless told otherwise.
-  const pickDir = (e) => {
+  const pickDir = (e: ChangeEvent<HTMLSelectElement>) => {
     const path = e.target.value;
     setF((x) => ({ ...x, path, name: isNew && (!x.name || x.name === x.path.toLowerCase()) ? path.toLowerCase() : x.name }));
   };
-  const pickRepo = (e) => {
+  const pickRepo = (e: ChangeEvent<HTMLInputElement>) => {
     const repo = e.target.value;
-    const guess = (r) => (r.split("/")[1] || "").replace(/\.git$/, "").toLowerCase();
+    const guess = (r: string) => (r.split("/")[1] || "").replace(/\.git$/, "").toLowerCase();
     setF((x) => ({ ...x, repo, name: isNew && (!x.name || x.name === guess(x.repo)) ? guess(repo) : x.name }));
   };
 
-  async function submit(e) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr(null);
@@ -254,8 +285,8 @@ function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
     try {
       await (isNew ? api.addWorkspace(body) : api.editWorkspace(ws.name, body));
       onDone();
-    } catch (e) {
-      setErr(e.message);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
     }
     setBusy(false);
   }
@@ -311,7 +342,9 @@ function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
 
       {f.source === "github" && (
         <label className="field">
-          <span>Branch <small className="muted">(optional)</small></span>
+          <span>
+            Branch <small className="muted">(optional)</small>
+          </span>
           <input value={f.branch} onChange={set("branch")} placeholder="blank: the repository's default branch" />
         </label>
       )}
@@ -332,7 +365,7 @@ function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
         <input value={f.tokenEnv} onChange={set("tokenEnv")} placeholder="token env var, e.g. GITHUB_TOKEN" />
         {ws?.tokenSet && (
           <label className="check">
-            <input type="checkbox" checked={f.clearToken} onChange={set("clearToken")} /> remove the stored token
+            <input type="checkbox" checked={f.clearToken} onChange={setClearToken} /> remove the stored token
           </label>
         )}
       </label>
@@ -372,7 +405,9 @@ function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
       </fieldset>
 
       <label className="field">
-        <span>Gateway name <small className="muted">(optional)</small></span>
+        <span>
+          Gateway name <small className="muted">(optional)</small>
+        </span>
         <input value={f.gateway} onChange={set("gateway")} placeholder="blank: derived from the name" maxLength={16} />
       </label>
 
@@ -390,10 +425,10 @@ function WorkspaceForm({ ws, dirs, profiles, onDone, onCancel }) {
 }
 
 // A workspace gateway's own view of its workspace: the repository tools.
-function WorkspaceRepo({ ws, catalog, runs, onRan }) {
+function WorkspaceRepo({ ws, catalog, runs, onRan }: { ws: OwnWorkspace; catalog: Job[]; runs: Record<string, JobRun>; onRan: () => void }) {
   const jobs = (catalog || []).filter((j) => j.workspace);
   const first = ["pull", "diff_repo", "push_branch", "create_pull_request"];
-  const main = first.map((n) => jobs.find((j) => j.name === n)).filter(Boolean);
+  const main = first.map((n) => jobs.find((j) => j.name === n)).filter((j): j is Job => !!j);
   const more = jobs.filter((j) => !first.includes(j.name));
   return (
     <div className="panel wide">
@@ -453,15 +488,33 @@ function WorkspaceRepo({ ws, catalog, runs, onRan }) {
   );
 }
 
+interface ChildGatewayForm {
+  name: string;
+  services: string[];
+  docker: "host" | "dind";
+  withWs: boolean;
+  branch: string;
+}
+
 // Ad hoc child gateways: whatever you want to try, nested under this one
 // (gw/<this>/gw/<name>/), not in workspace.yaml and gone when stopped. By
 // default they run on this gateway's own docker and, if this gateway serves
 // a workspace, work on it.
-function ChildGateways({ own, self, gateways, onChanged }) {
+function ChildGateways({
+  own,
+  self,
+  gateways,
+  onChanged,
+}: {
+  own: OwnWorkspace | null;
+  self: GatewaySelf | null;
+  gateways: Gateway[];
+  onChanged: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: "", services: ["deightz"], docker: "host", withWs: true, branch: "" });
+  const [f, setF] = useState<ChildGatewayForm>({ name: "", services: ["deightz"], docker: "host", withWs: true, branch: "" });
   const useWs = !!own && f.withWs;
-  const [branches, setBranches] = useState([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const loadBranches = useCallback(() => {
     api
       .branches()
@@ -474,11 +527,11 @@ function ChildGateways({ own, self, gateways, onChanged }) {
     return () => clearInterval(t);
   }, [loadBranches]);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const toggleSvc = (n) =>
+  const [err, setErr] = useState<string | null>(null);
+  const toggleSvc = (n: string) =>
     setF((x) => ({ ...x, services: x.services.includes(n) ? x.services.filter((s) => s !== n) : [...x.services, n] }));
 
-  async function launch(e) {
+  async function launch(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr(null);
@@ -487,14 +540,14 @@ function ChildGateways({ own, self, gateways, onChanged }) {
         name: f.name.trim(),
         profiles: f.services,
         docker: f.docker,
-        workspace: useWs ? own.name : "",
+        workspace: useWs && own ? own.name : "",
         branch: f.branch,
       });
       setOpen(false);
       setF((x) => ({ ...x, name: "" }));
       onChanged();
-    } catch (e) {
-      setErr(e.message);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
     }
     setBusy(false);
   }
@@ -556,7 +609,11 @@ function ChildGateways({ own, self, gateways, onChanged }) {
             <span>Name</span>
             <input value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} placeholder="e.g. review" maxLength={16} />
             <small className="muted">
-              Lowercase letters and digits. Mounted at <code>{self?.prefix}/gw/{f.name || "<name>"}/</code>.
+              Lowercase letters and digits. Mounted at{" "}
+              <code>
+                {self?.prefix}/gw/{f.name || "<name>"}/
+              </code>
+              .
             </small>
           </label>
           {own && (
@@ -619,17 +676,17 @@ function ChildGateways({ own, self, gateways, onChanged }) {
   );
 }
 
-function BranchRow({ b, onLaunch, onDeleted }) {
+function BranchRow({ b, onLaunch, onDeleted }: { b: Branch; onLaunch: () => void; onDeleted: () => void }) {
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
   async function del() {
     setErr(null);
     try {
       await api.deleteBranch(b.id);
       onDeleted();
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }
   return (
@@ -668,7 +725,7 @@ function BranchRow({ b, onLaunch, onDeleted }) {
 // A workspace gateway that hasn't heard from its parent yet: everything
 // about its workspace - repo, mount, token - arrives over NATS once the
 // parent has linked to it (usually within ~15 seconds of starting).
-function WorkspacePending({ name }) {
+function WorkspacePending({ name }: { name: string }) {
   return (
     <div className="panel wide">
       <h2>

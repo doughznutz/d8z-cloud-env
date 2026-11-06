@@ -14,6 +14,8 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// NatsHub is this gateway's embedded NATS server and its in-process client.
+//
 // Every gateway in the cascade embeds its own NATS server, forming a tree of
 // leaf node connections that mirrors the Traefik/gwlink cascade exactly:
 // a running child listens for leaf connections on NatsLeafPort, and its
@@ -46,16 +48,28 @@ func gwSubject(id, suffix string) string {
 	return "gw." + natsSubjectID(id) + "." + suffix
 }
 
-// startNatsHub brings up the embedded server, its JetStream store, and an
-// in-process client (no TCP client port - nothing outside this process
-// needs one; only the leafnode port is reachable from other containers).
+// startNatsHub brings up the embedded server, its JetStream store, an
+// in-process client (see NatsHub.nc below), and a plain client listener on
+// NatsClientPort - unauthenticated, like the rest of internal_net, so an
+// ordinary NATS client in another dev container (gopher's or carol's chat
+// tab, say)
+// can connect directly instead of going through this gateway's HTTP API.
 func startNatsHub(cfg Config) (*NatsHub, error) {
 	if err := os.MkdirAll(cfg.NatsStoreDir, 0o755); err != nil {
 		return nil, fmt.Errorf("nats store dir: %w", err)
 	}
+	// server.Options.Port == 0 means "the default client port" (4222), not
+	// "pick a free one" (that's -1) - a zero-value Config (as in tests that
+	// build one by hand, never through loadConfig) would otherwise collide
+	// with every other hub started in the same test process.
+	clientPort := cfg.NatsClientPort
+	if clientPort == 0 {
+		clientPort = -1
+	}
 	opts := &server.Options{
 		ServerName: "gw-" + cfg.ID,
-		DontListen: true, // no plain client listener; see NatsHub.nc below
+		Host:       "0.0.0.0",
+		Port:       clientPort,
 		LeafNode: server.LeafNodeOpts{
 			// Reachable over gwlink (internal-only) - or, for a cloud
 			// gateway, published to the internet, where it requires the
@@ -285,6 +299,8 @@ func (h *NatsHub) Ping(id, text string, timeout time.Duration) (string, error) {
 	return string(msg.Data), nil
 }
 
+// sameRemotes reports whether a and b name the same set of leaf URLs,
+// ignoring order.
 func sameRemotes(a, b []*server.RemoteLeafOpts) bool {
 	if len(a) != len(b) {
 		return false
@@ -301,6 +317,8 @@ func sameRemotes(a, b []*server.RemoteLeafOpts) bool {
 	return true
 }
 
+// Shutdown closes the in-process client and stops the embedded server. It
+// is safe to call on a nil hub.
 func (h *NatsHub) Shutdown() {
 	if h == nil {
 		return

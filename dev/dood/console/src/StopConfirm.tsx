@@ -1,20 +1,31 @@
 import { useEffect, useState } from "react";
-import { api } from "./api.js";
+import { api } from "./api";
+import type { Gateway, StopAction, WorkspaceStatus } from "./types";
 
-// Confirmation for stopping a gateway. It first asks the gateway itself
-// (over NATS, via our gw-server) what it has open, so a stop never silently
-// walks away from it:
-//   - its config changes (its branch of what we gave it): merge them into
-//     ours, save them as a branch to start a child from later (the
-//     default), or discard them - onStop(config) with merge|branch|discard;
-//   - for a workspace's gateway, uncommitted or untracked files and commits
-//     not on GitHub. Those files survive a stop (they live in the
-//     workspace's volume or host directory); what's at stake is forgetting
-//     about them, or deleting the volume afterwards.
-export function StopConfirm({ gw, onStop, onKeep, compact = false }) {
+/** Props for {@link StopConfirm}. */
+export interface StopConfirmProps {
+  gw: Gateway;
+  onStop: (action: StopAction) => void;
+  onKeep: () => void;
+  compact?: boolean;
+}
+
+/**
+ * Confirmation for stopping a gateway. It first asks the gateway itself
+ * (over NATS, via our gw-server) what it has open, so a stop never silently
+ * walks away from it:
+ *   - its config changes (its branch of what we gave it): merge them into
+ *     ours, save them as a branch to start a child from later (the
+ *     default), or discard them - onStop(action) with merge|branch|discard;
+ *   - for a workspace's gateway, uncommitted or untracked files and commits
+ *     not on GitHub. Those files survive a stop (they live in the
+ *     workspace's volume or host directory); what's at stake is forgetting
+ *     about them, or deleting the volume afterwards.
+ */
+export function StopConfirm({ gw, onStop, onKeep, compact = false }: StopConfirmProps) {
   const check = gw.state === "running";
-  const [st, setSt] = useState(null);
-  const [err, setErr] = useState(null);
+  const [st, setSt] = useState<WorkspaceStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!check) return;
@@ -22,7 +33,7 @@ export function StopConfirm({ gw, onStop, onKeep, compact = false }) {
     api
       .workspaceStatus(gw.name)
       .then((r) => live && setSt(r))
-      .catch((e) => live && setErr(e.message));
+      .catch((e: unknown) => live && setErr(e instanceof Error ? e.message : String(e)));
     return () => {
       live = false;
     };
@@ -67,16 +78,21 @@ export function StopConfirm({ gw, onStop, onKeep, compact = false }) {
               ✓ {st.git ? `nothing open on ${st.branch || "the checkout"}` : st.present ? "not a git checkout" : "workspace is empty"}
             </span>
           )}
-          {dirty && !st.error && (
+          {dirty && st && !st.error && (
             <>
               <span className="warn-text">
                 ⚠ {parts.join(", ")}
-                {st.branch && !compact && <> on <code>{st.branch}</code></>}
+                {st.branch && !compact && (
+                  <>
+                    {" "}
+                    on <code>{st.branch}</code>
+                  </>
+                )}
               </span>{" "}
               {review}
               {!compact && (
                 <>
-                  {st.files?.length > 0 && <pre className="log stop-files">{st.files.join("\n")}</pre>}
+                  {st.files && st.files.length > 0 && <pre className="log stop-files">{st.files.join("\n")}</pre>}
                   <div className="muted">
                     Stopping keeps these files in the workspace{st.source === "github" ? "'s volume" : " directory"} -
                     they're only gone if you then remove the workspace and delete its volume.

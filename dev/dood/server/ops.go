@@ -43,6 +43,9 @@ func (m *Manager) projectOp(name, state, phase string) (*op, error) {
 	return o, nil
 }
 
+// finishProject records the outcome of the op started under name. On error
+// the op is kept with its error; a successful job is kept as "done" so its
+// output stays readable; any other successful op is dropped.
 func (m *Manager) finishProject(name string, o *op, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

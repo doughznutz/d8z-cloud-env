@@ -7,12 +7,14 @@ import (
 	"testing"
 )
 
+// cfgManager is a Manager whose config dir is a fresh temp dir.
 func cfgManager(t *testing.T) *Manager {
 	dir := t.TempDir()
 	wsf := filepath.Join(dir, "workspace.yaml")
 	return &Manager{cfg: Config{DeploymentFile: filepath.Join(dir, "deployment.yaml"), WorkspaceFile: wsf}, ws: &wsStore{file: wsf}}
 }
 
+// writeCfg writes files (name -> content) into m's config dir.
 func writeCfg(t *testing.T, m *Manager, files map[string]string) {
 	for f, s := range files {
 		if err := os.WriteFile(filepath.Join(m.cfgDir(), f), []byte(s), 0o600); err != nil {
@@ -21,6 +23,7 @@ func writeCfg(t *testing.T, m *Manager, files map[string]string) {
 	}
 }
 
+// readCfg reads file f from m's config dir.
 func readCfg(t *testing.T, m *Manager, f string) string {
 	b, err := os.ReadFile(filepath.Join(m.cfgDir(), f))
 	if err != nil {
@@ -29,6 +32,7 @@ func readCfg(t *testing.T, m *Manager, f string) string {
 	return string(b)
 }
 
+// parentWS is the parent's workspace.yaml the config tests start from.
 const parentWS = `workspaces:
   - name: alpha
     source: github
@@ -143,6 +147,8 @@ func TestConfigBranchRebaseMerge(t *testing.T) {
 	}
 }
 
+// TestConfigGiftCarriesNamedEnv checks that a config handed to a child
+// carries the values of the env vars its token_env keys name.
 func TestConfigGiftCarriesNamedEnv(t *testing.T) {
 	m := cfgManager(t)
 	t.Setenv("MY_TOKEN_FOR_TEST", "s3cret")

@@ -41,6 +41,9 @@ type Gateway struct {
 	Workspace  string          `json:"workspace,omitempty"`  // workspace it serves
 }
 
+// SpawnRequest is everything needed to start a child gateway. It's also
+// recorded in the child's labels, so the same request can be rebuilt later
+// (childSpec) to restart it.
 type SpawnRequest struct {
 	Name      string   `json:"name"`
 	Profiles  []string `json:"profiles"`
@@ -50,35 +53,43 @@ type SpawnRequest struct {
 	Branch    string   `json:"branch"`    // saved config branch to start from (cfgtree.go); "" = none
 }
 
+// nameRE is a valid child gateway name: no "-" or ".", so IDs and NATS
+// subjects built from names stay unambiguous.
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
 
+// errExists is returned when spawning a gateway whose name is taken (or busy).
 var errExists = errors.New("gateway already exists")
 
 // op tracks an in-flight (or failed) spawn/stop so the console can show
 // progress before - or after - the containers themselves exist.
 type op struct {
-	State string // starting | stopping | error | done
-	Phase string // human-readable step while starting/stopping
-	Err   string
-	Req   SpawnRequest
-	Log   *ringBuf
+	State string       // starting | stopping | error | done
+	Phase string       // human-readable step while starting/stopping
+	Err   string       // the failure, when State is "error"
+	Req   SpawnRequest // what was asked for (spawns only)
+	Log   *ringBuf     // the op's output, for the console
 }
 
+// Manager is gw-server's state: our config, in-flight ops, the NATS hub,
+// the workspace store and assignment, and our children's requests. All of
+// the gateway's behaviour hangs off it.
 type Manager struct {
 	cfg      Config
-	self     string // our container id (docker sets the hostname to it)
-	mu       sync.Mutex
-	ops      map[string]*op
-	projOps  map[string]*op // same shape, keyed by project name - kept separate so a gateway and a project can share a name
-	recMu    sync.Mutex
-	ready    sync.Map // name -> upstream it was last seen ready at
-	selfProj atomic.Value
-	ws       *wsStore
+	self     string                       // our container id (docker sets the hostname to it)
+	mu       sync.Mutex                   // guards ops, projOps, requests and every op's fields
+	ops      map[string]*op               // spawn/stop ops, by child gateway name
+	projOps  map[string]*op               // same shape, keyed by project name - kept separate so a gateway and a project can share a name
+	recMu    sync.Mutex                   // serializes Reconcile
+	ready    sync.Map                     // name -> upstream it was last seen ready at
+	selfProj atomic.Value                 // our compose project name, once found (selfProject)
+	ws       *wsStore                     // workspace.yaml
 	assign   atomic.Pointer[wsAssignment] // a workspace gateway's assignment, once its parent has sent it
-	nats     *NatsHub
-	requests map[string]*ParentRequest // our children's, by name (requests.go); under mu
+	nats     *NatsHub                     // nil if the embedded NATS server failed to start
+	requests map[string]*ParentRequest    // our children's, by name (requests.go); under mu
 }
 
+// NewManager builds the Manager and starts the embedded NATS hub. A NATS
+// failure is logged, not fatal: the gateway runs without it (m.nats nil).
 func NewManager(cfg Config) *Manager {
 	self, _ := os.Hostname()
 	m := &Manager{cfg: cfg, self: self, ops: map[string]*op{}, projOps: map[string]*op{}, ws: &wsStore{file: cfg.WorkspaceFile}}
@@ -91,17 +102,27 @@ func NewManager(cfg Config) *Manager {
 	return m
 }
 
+// childID is child name's GW_ID: its bare name under the root, else our ID
+// and its name dash-joined.
 func (m *Manager) childID(name string) string {
 	if m.cfg.ID == "root" {
 		return name
 	}
 	return m.cfg.ID + "-" + name
 }
+
+// project is child name's compose project name.
 func (m *Manager) project(name string) string { return "d8zgw-" + m.childID(name) }
-func (m *Manager) prefix(name string) string  { return m.cfg.Prefix + "/gw/" + name }
+
+// prefix is the external URL prefix child name is mounted at.
+func (m *Manager) prefix(name string) string { return m.cfg.Prefix + "/gw/" + name }
+
+// routeFile is child name's Traefik file-provider route.
 func (m *Manager) routeFile(name string) string {
 	return filepath.Join(m.cfg.RoutesDir, "gw-"+name+".yml")
 }
+
+// overrideFile is child name's generated compose override.
 func (m *Manager) overrideFile(name string) string {
 	return filepath.Join(m.cfg.StateDir, m.project(name)+".override.yaml")
 }
@@ -139,6 +160,9 @@ func innerHost(project string) string {
 	return "tcp://" + project + "-dind-1:2375"
 }
 
+// List is every child gateway, sorted by name: running ones from docker,
+// plus any still starting, stopping or failed from our ops. A running child
+// reports "starting" until probe sees it answer through our Traefik.
 func (m *Manager) List(ctx context.Context) ([]Gateway, error) {
 	cs, err := childGateways(ctx, m.cfg.ID)
 	svcs, _ := projectServices(ctx, "")
@@ -235,6 +259,7 @@ func (m *Manager) probe(ctx context.Context, g *Gateway) bool {
 	return true
 }
 
+// Log is the output of child name's current or last spawn/stop op.
 func (m *Manager) Log(name string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -244,6 +269,8 @@ func (m *Manager) Log(name string) (string, bool) {
 	return "", false
 }
 
+// Spawn validates req and starts the child gateway in the background,
+// tracked as an op; errExists if the name is taken or busy.
 func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) error {
 	if !nameRE.MatchString(req.Name) {
 		return fmt.Errorf("name must match %s", nameRE)
@@ -288,6 +315,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) error {
 	return nil
 }
 
+// finish records the outcome of child name's op: an error is kept for the
+// console; on success the op is dropped (removeOp) or marked done.
 func (m *Manager) finish(name string, o *op, err error, removeOp bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -303,12 +332,15 @@ func (m *Manager) finish(name string, o *op, err error, removeOp bool) {
 	}
 }
 
+// setPhase updates the step an op shows the console.
 func (m *Manager) setPhase(o *op, phase string) {
 	m.mu.Lock()
 	o.Phase = phase
 	m.mu.Unlock()
 }
 
+// runSpawn is Spawn's background half: bring the bundle up, then
+// Reconcile so its route and NATS leaf link are attached.
 func (m *Manager) runSpawn(req SpawnRequest, o *op) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
@@ -432,6 +464,7 @@ func upWithRetryEnv(ctx context.Context, w *ringBuf, host string, extraEnv []str
 	return err
 }
 
+// childLabels are the d8z.gw.* labels put on a child's entry container.
 func (m *Manager) childLabels(req SpawnRequest, profs []string) [][2]string {
 	return [][2]string{
 		{labelParent, m.cfg.ID}, {labelID, m.childID(req.Name)}, {labelName, req.Name},
@@ -575,6 +608,8 @@ func (m *Manager) attach(ctx context.Context, project string) {
 	}
 }
 
+// writeIfChanged atomically replaces path with content unless it already
+// holds exactly that (errors are ignored: the next Reconcile retries).
 func writeIfChanged(path, content string) {
 	if old, err := os.ReadFile(path); err == nil && string(old) == content {
 		return
@@ -585,6 +620,8 @@ func writeIfChanged(path, content string) {
 	}
 }
 
+// renderRoute is the Traefik dynamic config routing child name's prefix
+// to upstream.
 func (m *Manager) renderRoute(name, upstream string) string {
 	p := m.prefix(name)
 	return fmt.Sprintf(`# Generated by gw-server for child gateway %q - do not edit.
@@ -612,6 +649,7 @@ func (m *Manager) dozzlePath() string {
 	return m.cfg.Prefix + "/dozzle/"
 }
 
+// yq quotes s for YAML (a JSON string is a valid YAML scalar).
 func yq(s string) string { b, _ := json.Marshal(s); return string(b) }
 
 // renderSidecar labels a dind child's sidecar as the gateway's entry and,
@@ -712,7 +750,7 @@ func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]s
 	fmt.Fprintf(&b, "  dood:\n    environment:\n")
 	// Every sidebar-capable service, not just the ones started with it: the
 	// console lists only those actually in its bundle, so one started later
-	// on demand (og, gopher) shows up too.
+	// on demand (og, gopher, carol) shows up too.
 	isolated, dozzle, svcs := "false", "", uiServices(allProfileNames())
 	if inDind {
 		isolated = "true"
@@ -760,6 +798,7 @@ func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]s
 	fmt.Fprintf(&b, "  dozzle:\n    environment:\n      DOZZLE_BASE: %s\n", yq(prefix+"/dozzle"))
 	fmt.Fprintf(&b, "  og:\n    environment:\n      OG_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/og", "/")))
 	fmt.Fprintf(&b, "  gopher:\n    environment:\n      GOPHER_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/gopher", "/")))
+	fmt.Fprintf(&b, "  carol:\n    environment:\n      CAROL_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/carol", "/")))
 	if ws != nil {
 		// Its Deightz edits the same workspace.
 		b.WriteString("  deightz:\n    environment:\n      GITHUB_TOKEN: \"\"\n    volumes: !override\n      - /var/run/docker.sock:/var/run/docker.sock\n")
@@ -829,17 +868,20 @@ func (m *Manager) seedImages(ctx context.Context, o *op, target string, configAr
 	}
 }
 
+// countingReader counts the bytes read through it, readable concurrently.
 type countingReader struct {
 	r io.Reader
 	n atomic.Int64
 }
 
+// Read reads from the underlying reader and adds to the count.
 func (c *countingReader) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.n.Add(int64(n))
 	return n, err
 }
 
+// human formats a byte count as KB, MB or GB.
 func human(b int64) string {
 	switch {
 	case b >= 1<<30:
@@ -858,8 +900,10 @@ type ringBuf struct {
 	buf []byte
 }
 
+// newRingBuf makes a ringBuf keeping the last max bytes.
 func newRingBuf(max int) *ringBuf { return &ringBuf{max: max} }
 
+// Write appends p, dropping the oldest bytes beyond max. It never fails.
 func (r *ringBuf) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -870,6 +914,7 @@ func (r *ringBuf) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// String is the buffered tail ("" for a nil ringBuf).
 func (r *ringBuf) String() string {
 	if r == nil {
 		return ""
@@ -906,6 +951,7 @@ func (m *Manager) Bundle(ctx context.Context) ([]ServiceStatus, error) {
 	return append([]ServiceStatus{}, all[p]...), nil
 }
 
+// BundleLogs is the tail of one of our own bundle's service logs.
 func (m *Manager) BundleLogs(ctx context.Context, service string) (string, error) {
 	p := m.selfProject(ctx)
 	if p == "" {

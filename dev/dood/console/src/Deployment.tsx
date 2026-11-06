@@ -1,6 +1,20 @@
+import type { ChangeEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { JobRow, LogView } from "./App.jsx";
-import { api } from "./api.js";
+import { JobRow } from "./JobRow";
+import { LogView } from "./LogView";
+import { api } from "./api";
+import type {
+  Deployment,
+  DeploymentImage,
+  DeploymentTarget,
+  DeploymentTargetEntry,
+  DockerHub,
+  GCP,
+  HubRepoStatus,
+  EditingKey,
+  Job,
+  JobRun,
+} from "./types";
 
 // The Deployment tab: deployment.yaml, viewed and edited here section by
 // section (like workspace.yaml on the Workspaces tab) - the Docker Hub
@@ -9,29 +23,37 @@ import { api } from "./api.js";
 // NATS line to each running cloud gateway. Secrets are write-only: set,
 // replace or clear, never shown.
 
-const JOB_GROUPS = { docker: "Docker Hub jobs", cloud: "Cloud jobs" };
+const JOB_GROUPS: Record<string, string> = { docker: "Docker Hub jobs", cloud: "Cloud jobs" };
 
-export function DeploymentPage({ catalog, runs, onRan }) {
-  const [dep, setDep] = useState(null);
-  const [err, setErr] = useState(null);
+/** Props for {@link DeploymentPage}. */
+export interface DeploymentPageProps {
+  catalog: Job[];
+  runs: Record<string, JobRun>;
+  onRan: () => void;
+}
+
+/** The Deployment tab: deployment.yaml, viewed and edited section by section. */
+export function DeploymentPage({ catalog, runs, onRan }: DeploymentPageProps) {
+  const [dep, setDep] = useState<Deployment | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setDep(await api.deployment());
       setErr(null);
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }, []);
   useEffect(() => {
-    load();
+    void load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load]);
 
   const groups = useMemo(() => {
-    const g = {};
-    for (const j of catalog || []) if (!j.workspace) (g[j.group] ||= []).push(j);
+    const g: Record<string, Job[]> = {};
+    for (const j of catalog || []) if (!j.workspace) (g[j.group] ??= []).push(j);
     return g;
   }, [catalog]);
 
@@ -57,12 +79,12 @@ export function DeploymentPage({ catalog, runs, onRan }) {
           <code>{dep?.file}</code>{" "}
           <span className="muted">
             {dep?.fromFile
-                ? "(can hold keys: kept outside every repository)"
-                : "(not written yet: showing defaults from .env; saved on your first change)"}
+              ? "(can hold keys: kept outside every repository)"
+              : "(not written yet: showing defaults from .env; saved on your first change)"}
           </span>
         </dd>
       </dl>
-      {(err || dep?.error) && <div className="banner error">{err || dep.error}</div>}
+      {(err || dep?.error) && <div className="banner error">{err || dep?.error}</div>}
 
       {dep?.dockerHub && (
         <>
@@ -97,7 +119,7 @@ export function DeploymentPage({ catalog, runs, onRan }) {
 
 // ---- shared bits ----
 
-function SectionHead({ title, children }) {
+function SectionHead({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <h3 className="dep-head">
       {title}
@@ -106,7 +128,18 @@ function SectionHead({ title, children }) {
   );
 }
 
-function FormShell({ title, busy, err, onCancel, onSubmit, submitLabel = "Save", canSubmit = true, children }) {
+interface FormShellProps {
+  title: string;
+  busy: boolean;
+  err: string | null;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitLabel?: string;
+  canSubmit?: boolean;
+  children?: ReactNode;
+}
+
+function FormShell({ title, busy, err, onCancel, onSubmit, submitLabel = "Save", canSubmit = true, children }: FormShellProps) {
   return (
     <form
       className="ws-form"
@@ -131,17 +164,17 @@ function FormShell({ title, busy, err, onCancel, onSubmit, submitLabel = "Save",
 }
 
 // useSave runs a save call, tracking busy/error, then onDone.
-function useSave(onDone) {
+function useSave(onDone: () => void) {
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const run = async (fn) => {
+  const [err, setErr] = useState<string | null>(null);
+  const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setErr(null);
     try {
       await fn();
       onDone();
     } catch (e) {
-      setErr(e.message);
+      setErr(e instanceof Error ? e.message : String(e));
     }
     setBusy(false);
   };
@@ -149,9 +182,9 @@ function useSave(onDone) {
 }
 
 // RemoveButton confirms inline before calling fn.
-function RemoveButton({ fn, onDone, label = "Remove" }) {
+function RemoveButton({ fn, onDone, label = "Remove" }: { fn: () => Promise<unknown>; onDone: () => void; label?: string }) {
   const [confirm, setConfirm] = useState(false);
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
   if (!confirm)
     return (
       <>
@@ -172,7 +205,7 @@ function RemoveButton({ fn, onDone, label = "Remove" }) {
             await fn();
             onDone();
           } catch (e) {
-            setErr(e.message);
+            setErr(e instanceof Error ? e.message : String(e));
           }
         }}
       >
@@ -183,19 +216,35 @@ function RemoveButton({ fn, onDone, label = "Remove" }) {
   );
 }
 
-const field = (setF, k) => (e) => {
-  const v = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+type FieldEvent = ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>;
+
+const field = <T,>(setF: Dispatch<SetStateAction<T>>, k: keyof T) => (e: FieldEvent) => {
+  const target = e.target;
+  const v = target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value;
   setF((x) => ({ ...x, [k]: v }));
 };
 
 // ---- Docker Hub: account, repository, token ----
 
-function DockerHubSection({ hub, editable, onChanged, onRan }) {
+/** The Docker Hub repo-status check: in flight, present, or absent/errored. */
+type RepoCheckState = { checking: true } | HubRepoStatus | null;
+
+function DockerHubSection({
+  hub,
+  editable,
+  onChanged,
+  onRan,
+}: {
+  hub: DockerHub;
+  editable: boolean;
+  onChanged: () => void;
+  onRan: () => void;
+}) {
   const [editing, setEditing] = useState(false);
-  const [repo, setRepo] = useState(null); // {exists, private, ...} | {error}
+  const [repo, setRepo] = useState<RepoCheckState>(null);
   const [creating, setCreating] = useState(false);
-  const [vis, setVis] = useState("public");
-  const [createErr, setCreateErr] = useState(null);
+  const [vis, setVis] = useState<"public" | "private">("public");
+  const [createErr, setCreateErr] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
 
   const check = useCallback(async () => {
@@ -203,13 +252,13 @@ function DockerHubSection({ hub, editable, onChanged, onRan }) {
     try {
       setRepo(await api.hubRepoStatus());
     } catch (e) {
-      setRepo({ error: e.message });
+      setRepo({ error: e instanceof Error ? e.message : String(e) });
     }
   }, []);
   const key = `${hub.username}/${hub.repository}`;
   useEffect(() => {
-    if (hub.username && hub.repository) check();
-  }, [key, check]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (hub.username && hub.repository) void check();
+  }, [key, check]); // eslint-disable-line react-hooks/exhaustive-deps -- `key` already encodes the identity (username/repository) this effect reacts to; adding `hub` would re-fire on every parent re-render instead of only when the repo identity changes.
 
   async function create() {
     setCreating(false);
@@ -220,7 +269,7 @@ function DockerHubSection({ hub, editable, onChanged, onRan }) {
       onRan();
       setTimeout(check, 3000);
     } catch (e) {
-      setCreateErr(e.message);
+      setCreateErr(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -239,18 +288,18 @@ function DockerHubSection({ hub, editable, onChanged, onRan }) {
           <a href={`https://hub.docker.com/r/${key}/tags`} target="_blank" rel="noreferrer">
             <code>{key}</code>
           </a>{" "}
-          {repo?.checking && <span className="muted">checking…</span>}
-          {repo?.error && <span className="error-text">{repo.error}</span>}
-          {repo && repo.exists === true && (
+          {repo && "checking" in repo && <span className="muted">checking…</span>}
+          {repo && "error" in repo && <span className="error-text">{repo.error}</span>}
+          {repo && "exists" in repo && repo.exists === true && (
             <span className="muted">
               exists · {repo.private ? "private" : "public"} · {repo.pulls} pulls
             </span>
           )}
-          {repo && repo.exists === false && <span className="warn-text">doesn't exist on Docker Hub yet</span>}{" "}
+          {repo && "exists" in repo && repo.exists === false && <span className="warn-text">doesn't exist on Docker Hub yet</span>}{" "}
           <button className="link-btn" onClick={check}>
             Check
           </button>
-          {editable && repo && repo.exists === false && !creating && (
+          {editable && repo && "exists" in repo && repo.exists === false && !creating && (
             <>
               {" · "}
               <button className="link-btn" onClick={() => setCreating(true)}>
@@ -260,7 +309,7 @@ function DockerHubSection({ hub, editable, onChanged, onRan }) {
           )}
           {creating && (
             <span className="confirm-inline">
-              <select value={vis} onChange={(e) => setVis(e.target.value)}>
+              <select value={vis} onChange={(e) => setVis(e.target.value as "public" | "private")}>
                 <option value="public">public</option>
                 <option value="private">private</option>
               </select>
@@ -298,7 +347,7 @@ function DockerHubSection({ hub, editable, onChanged, onRan }) {
   );
 }
 
-function DockerHubForm({ hub, onCancel, onDone }) {
+function DockerHubForm({ hub, onCancel, onDone }: { hub: DockerHub; onCancel: () => void; onDone: () => void }) {
   const [f, setF] = useState({
     username: hub.username || "",
     repository: hub.repository || "",
@@ -314,7 +363,7 @@ function DockerHubForm({ hub, onCancel, onDone }) {
       err={err}
       onCancel={onCancel}
       onSubmit={() => run(() => api.editDockerHub(f))}
-      canSubmit={f.username.trim() && f.repository.trim()}
+      canSubmit={!!(f.username.trim() && f.repository.trim())}
     >
       <label className="field">
         <span>Account (namespace)</span>
@@ -324,8 +373,11 @@ function DockerHubForm({ hub, onCancel, onDone }) {
         <span>Repository</span>
         <input value={f.repository} onChange={field(setF, "repository")} placeholder="e.g. doughznutz" />
         <small className="muted">
-          Every image below is a tag of this one repository: <code>{f.username || "account"}/{f.repository || "repository"}:&lt;image&gt;</code>.
-          Changing it doesn't move existing tags; use <b>Check</b> / <b>Create repository</b> after saving.
+          Every image below is a tag of this one repository:{" "}
+          <code>
+            {f.username || "account"}/{f.repository || "repository"}:&lt;image&gt;
+          </code>
+          . Changing it doesn't move existing tags; use <b>Check</b> / <b>Create repository</b> after saving.
         </small>
       </label>
       <label className="field">
@@ -351,10 +403,22 @@ function DockerHubForm({ hub, onCancel, onDone }) {
 
 // ---- Images: tag -> compose build service ----
 
-function ImagesSection({ hub, services, targets, editable, onChanged }) {
-  const [editing, setEditing] = useState(null); // null | "new" | image name
+function ImagesSection({
+  hub,
+  services,
+  targets,
+  editable,
+  onChanged,
+}: {
+  hub: DockerHub;
+  services: string[];
+  targets: DeploymentTargetEntry[];
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const [editing, setEditing] = useState<EditingKey>(null);
   const im = editing && editing !== "new" ? hub.images.find((i) => i.name === editing) : null;
-  const usedBy = (name) => targets.filter((t) => t.target.image === name).map((t) => t.target.name);
+  const usedBy = (name: string) => targets.filter((t) => t.target.image === name).map((t) => t.target.name);
   return (
     <>
       <SectionHead title="Images">
@@ -390,7 +454,7 @@ function ImagesSection({ hub, services, targets, editable, onChanged }) {
       {editing !== null && (
         <ImageForm
           key={editing}
-          im={im}
+          im={im ?? null}
           services={services}
           onCancel={() => setEditing(null)}
           onDone={() => {
@@ -403,7 +467,17 @@ function ImagesSection({ hub, services, targets, editable, onChanged }) {
   );
 }
 
-function ImageForm({ im, services, onCancel, onDone }) {
+function ImageForm({
+  im,
+  services,
+  onCancel,
+  onDone,
+}: {
+  im: DeploymentImage | null;
+  services: string[];
+  onCancel: () => void;
+  onDone: () => void;
+}) {
   const [f, setF] = useState({ name: im?.name || "", service: im?.service || services[0] || "" });
   const { busy, err, run } = useSave(onDone);
   const opts = f.service && !services.includes(f.service) ? [...services, f.service] : services;
@@ -414,7 +488,7 @@ function ImageForm({ im, services, onCancel, onDone }) {
       err={err}
       onCancel={onCancel}
       onSubmit={() => run(() => (im ? api.editImage(im.name, f) : api.addImage(f)))}
-      canSubmit={f.name.trim() && f.service}
+      canSubmit={!!(f.name.trim() && f.service)}
       submitLabel={im ? "Save" : "Add image"}
     >
       <label className="field">
@@ -446,7 +520,7 @@ function ImageForm({ im, services, onCancel, onDone }) {
 
 // ---- GCP: project, zone, service-account key ----
 
-function GCPSection({ gcp, editable, onChanged }) {
+function GCPSection({ gcp, editable, onChanged }: { gcp: GCP; editable: boolean; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   return (
     <>
@@ -487,7 +561,7 @@ function GCPSection({ gcp, editable, onChanged }) {
   );
 }
 
-function GCPForm({ gcp, onCancel, onDone }) {
+function GCPForm({ gcp, onCancel, onDone }: { gcp: GCP; onCancel: () => void; onDone: () => void }) {
   const [f, setF] = useState({
     project: gcp.project || "",
     zone: gcp.zone || "",
@@ -496,16 +570,16 @@ function GCPForm({ gcp, onCancel, onDone }) {
     clearKey: false,
   });
   const { busy, err, run } = useSave(onDone);
-  const pickFile = async (e) => {
+  const pickFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
     setF((x) => ({ ...x, keyJSON: text }));
   };
-  let keyInfo = null;
+  let keyInfo: { ok: string } | { bad: string } | null = null;
   if (f.keyJSON.trim()) {
     try {
-      const k = JSON.parse(f.keyJSON);
+      const k = JSON.parse(f.keyJSON) as { type?: string; client_email?: string; project_id?: string };
       keyInfo = k.type === "service_account" ? { ok: `${k.client_email} (project ${k.project_id})` } : { bad: "not a service-account key" };
     } catch {
       keyInfo = { bad: "not valid JSON" };
@@ -518,17 +592,17 @@ function GCPForm({ gcp, onCancel, onDone }) {
       err={err}
       onCancel={onCancel}
       onSubmit={() => run(() => api.editGCP(f))}
-      canSubmit={!keyInfo?.bad}
+      canSubmit={!(keyInfo && "bad" in keyInfo)}
     >
       <label className="field">
         <span>Project ID</span>
         <input value={f.project} onChange={field(setF, "project")} placeholder="e.g. d8z-cloud-123456" />
-        {keyInfo?.ok && !f.project && (
+        {keyInfo && "ok" in keyInfo && !f.project && (
           <small>
             <button
               type="button"
               className="link-btn"
-              onClick={() => setF((x) => ({ ...x, project: JSON.parse(x.keyJSON).project_id || "" }))}
+              onClick={() => setF((x) => ({ ...x, project: (JSON.parse(x.keyJSON) as { project_id?: string }).project_id || "" }))}
             >
               use the key's project
             </button>
@@ -561,8 +635,8 @@ function GCPForm({ gcp, onCancel, onDone }) {
           placeholder='{"type": "service_account", ...}'
           spellCheck={false}
         />
-        {keyInfo?.ok && <small className="ok-text">✓ {keyInfo.ok}</small>}
-        {keyInfo?.bad && <small className="error-text">{keyInfo.bad}</small>}
+        {keyInfo && "ok" in keyInfo && <small className="ok-text">✓ {keyInfo.ok}</small>}
+        {keyInfo && "bad" in keyInfo && <small className="error-text">{keyInfo.bad}</small>}
         {gcp.keyEmail && (
           <label className="check">
             <input type="checkbox" checked={f.clearKey} onChange={field(setF, "clearKey")} /> delete the stored key
@@ -579,8 +653,20 @@ function GCPForm({ gcp, onCancel, onDone }) {
 
 // ---- Cloud targets ----
 
-function TargetsSection({ targets, images, publicIP, editable, onChanged }) {
-  const [editing, setEditing] = useState(null);
+function TargetsSection({
+  targets,
+  images,
+  publicIP,
+  editable,
+  onChanged,
+}: {
+  targets: DeploymentTargetEntry[];
+  images: string[];
+  publicIP?: string;
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const [editing, setEditing] = useState<EditingKey>(null);
   const t = editing && editing !== "new" ? targets.find((x) => x.target.name === editing)?.target : null;
   return (
     <>
@@ -603,7 +689,7 @@ function TargetsSection({ targets, images, publicIP, editable, onChanged }) {
       {editing !== null && (
         <TargetForm
           key={editing}
-          t={t}
+          t={t ?? null}
           images={images}
           publicIP={publicIP}
           onCancel={() => setEditing(null)}
@@ -617,16 +703,26 @@ function TargetsSection({ targets, images, publicIP, editable, onChanged }) {
   );
 }
 
-function TargetRow({ t, editable, onEdit, onChanged }) {
+function TargetRow({
+  t,
+  editable,
+  onEdit,
+  onChanged,
+}: {
+  t: DeploymentTargetEntry;
+  editable: boolean;
+  onEdit: () => void;
+  onChanged: () => void;
+}) {
   const { target, state } = t;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [res, setRes] = useState(null);
-  const [err, setErr] = useState(null);
+  const [res, setRes] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const running = state?.status === "RUNNING";
   const dot = !state ? null : running ? (t.leafConnected ? "running" : "degraded") : state.status === "TERMINATED" ? "exited" : "starting";
 
-  async function send(e) {
+  async function send(e: FormEvent) {
     e.preventDefault();
     if (!text.trim()) return;
     setBusy(true);
@@ -637,7 +733,7 @@ function TargetRow({ t, editable, onEdit, onChanged }) {
       setRes(r.reply);
       setText("");
     } catch (e2) {
-      setErr(e2.message);
+      setErr(e2 instanceof Error ? e2.message : String(e2));
     }
     setBusy(false);
   }
@@ -702,7 +798,19 @@ function TargetRow({ t, editable, onEdit, onChanged }) {
   );
 }
 
-function TargetForm({ t, images, publicIP, onCancel, onDone }) {
+function TargetForm({
+  t,
+  images,
+  publicIP,
+  onCancel,
+  onDone,
+}: {
+  t: DeploymentTarget | null;
+  images: string[];
+  publicIP?: string;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
   const [f, setF] = useState({
     name: t?.name || "",
     profile: t?.profile || "root",
@@ -713,7 +821,11 @@ function TargetForm({ t, images, publicIP, onCancel, onDone }) {
     forwardEnv: (t?.forwardEnv || []).join(", "),
   });
   const { busy, err, run } = useSave(onDone);
-  const lines = (s, sep) => s.split(sep).map((x) => x.trim()).filter(Boolean);
+  const lines = (s: string, sep: string | RegExp) =>
+    s
+      .split(sep)
+      .map((x) => x.trim())
+      .filter(Boolean);
   const body = () => ({
     name: f.name.trim(),
     profile: f.profile,
@@ -731,7 +843,7 @@ function TargetForm({ t, images, publicIP, onCancel, onDone }) {
       err={err}
       onCancel={onCancel}
       onSubmit={() => run(() => (t ? api.editTarget(t.name, body()) : api.addTarget(body())))}
-      canSubmit={f.name.trim() && f.image}
+      canSubmit={!!(f.name.trim() && f.image)}
       submitLabel={t ? "Save" : "Add target"}
     >
       <label className="field">
@@ -751,7 +863,12 @@ function TargetForm({ t, images, publicIP, onCancel, onDone }) {
           </span>
         </label>
         <label className="check">
-          <input type="radio" name="profile" checked={f.profile === "workspace"} onChange={() => setF((x) => ({ ...x, profile: "workspace" }))} />
+          <input
+            type="radio"
+            name="profile"
+            checked={f.profile === "workspace"}
+            onChange={() => setF((x) => ({ ...x, profile: "workspace" }))}
+          />
           <span>
             <b>workspace</b>: dood + deightz
           </span>
@@ -786,7 +903,11 @@ function TargetForm({ t, images, publicIP, onCancel, onDone }) {
           {mine && !f.allowFrom.includes(mine) && (
             <>
               {" "}
-              <button type="button" className="link-btn" onClick={() => setF((x) => ({ ...x, allowFrom: [x.allowFrom.trim(), mine].filter(Boolean).join("\n") }))}>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => setF((x) => ({ ...x, allowFrom: [x.allowFrom.trim(), mine].filter(Boolean).join("\n") }))}
+              >
                 add this gateway's IP ({mine})
               </button>
             </>

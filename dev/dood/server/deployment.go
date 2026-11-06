@@ -41,47 +41,58 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// HubImage is one image we publish: a tag in the Docker Hub repository,
+// built by a docker-compose.yaml service.
 type HubImage struct {
 	Name    string `yaml:"name" json:"name"`       // tag in the repository: <username>/<repository>:<name>
 	Service string `yaml:"service" json:"service"` // the docker-compose.yaml service that builds it (a *-dh one)
 }
 
+// DockerHubConfig is deployment.yaml's docker_hub section: the account and
+// repository our images are pushed to, and how to authenticate.
 type DockerHubConfig struct {
 	Username   string     `yaml:"username,omitempty" json:"username"`
 	Repository string     `yaml:"repository,omitempty" json:"repository"`
-	Token      string     `yaml:"token,omitempty" json:"-"`
-	TokenEnv   string     `yaml:"token_env,omitempty" json:"tokenEnv,omitempty"`
+	Token      string     `yaml:"token,omitempty" json:"-"`                      // stored token (never sent to the console)
+	TokenEnv   string     `yaml:"token_env,omitempty" json:"tokenEnv,omitempty"` // or the env var holding it
 	Images     []HubImage `yaml:"images,omitempty" json:"images"`
 }
 
+// GCPConfig is deployment.yaml's gcp section: where cloud targets are
+// created and the service-account key used to do it.
 type GCPConfig struct {
 	Project     string `yaml:"project,omitempty" json:"project"`
 	Zone        string `yaml:"zone,omitempty" json:"zone"`
 	Credentials string `yaml:"credentials,omitempty" json:"credentials"` // key file name in the config dir
 }
 
+// CloudTarget is one cloud gateway: a VM running one profile of our dood
+// image, reachable over HTTP and as a NATS leaf.
 type CloudTarget struct {
-	Name        string   `yaml:"name" json:"name"`
-	Provider    string   `yaml:"provider,omitempty" json:"provider"`
-	Profile     string   `yaml:"profile,omitempty" json:"profile"`
-	Image       string   `yaml:"image,omitempty" json:"image"` // docker_hub image the gateway runs (its dood)
-	MachineType string   `yaml:"machine_type,omitempty" json:"machineType"`
-	DiskGB      int      `yaml:"disk_gb,omitempty" json:"diskGB"`
-	AllowFrom   []string `yaml:"allow_from,omitempty" json:"allowFrom"`
-	ForwardEnv  []string `yaml:"forward_env,omitempty" json:"forwardEnv,omitempty"`
+	Name        string   `yaml:"name" json:"name"`                                  // its GW_ID; the VM is d8z-<name>
+	Provider    string   `yaml:"provider,omitempty" json:"provider"`                // gcp (the only one)
+	Profile     string   `yaml:"profile,omitempty" json:"profile"`                  // root | workspace
+	Image       string   `yaml:"image,omitempty" json:"image"`                      // docker_hub image the gateway runs (its dood)
+	MachineType string   `yaml:"machine_type,omitempty" json:"machineType"`         // GCE machine type
+	DiskGB      int      `yaml:"disk_gb,omitempty" json:"diskGB"`                   // boot disk size
+	AllowFrom   []string `yaml:"allow_from,omitempty" json:"allowFrom"`             // CIDRs the firewall lets in
+	ForwardEnv  []string `yaml:"forward_env,omitempty" json:"forwardEnv,omitempty"` // our env vars passed to the VM
 }
 
+// Deployment is the whole of deployment.yaml.
 type Deployment struct {
 	DockerHub DockerHubConfig `yaml:"docker_hub" json:"dockerHub"`
 	GCP       GCPConfig       `yaml:"gcp" json:"gcp"`
 	Targets   []CloudTarget   `yaml:"targets" json:"targets"`
 }
 
+// The NATS leaf user and port every cloud gateway listens with.
 const (
 	cloudLeafUser = "d8z"
 	cloudLeafPort = 7422
 )
 
+// defaultHubImages are the images published when deployment.yaml lists none.
 var defaultHubImages = []HubImage{{Name: "dood", Service: "dood-dh"}, {Name: "d8z", Service: "deightz-dh"}}
 
 // loadDeployment reads deployment.yaml (or nothing, if it's absent) and
@@ -142,6 +153,8 @@ func (raw *Deployment) withDefaults() *Deployment {
 	return &d
 }
 
+// validate checks every field that ends up in a Docker Hub reference, a
+// GCE resource, a file name or an env var lookup.
 func (d *Deployment) validate() error {
 	h := d.DockerHub
 	if h.Username != "" && !hubRepoRE.MatchString(h.Username) {
@@ -208,6 +221,7 @@ func (d *Deployment) validate() error {
 	return nil
 }
 
+// image looks up a docker_hub image by name (tag).
 func (d *Deployment) image(name string) (HubImage, bool) {
 	for _, im := range d.DockerHub.Images {
 		if im.Name == name {
@@ -217,6 +231,7 @@ func (d *Deployment) image(name string) (HubImage, bool) {
 	return HubImage{}, false
 }
 
+// target looks up a cloud target by name.
 func (d *Deployment) target(name string) (CloudTarget, bool) {
 	for _, t := range d.Targets {
 		if t.Name == name {
@@ -231,6 +246,7 @@ func (d *Deployment) ref(name string) string {
 	return d.DockerHub.Username + "/" + d.DockerHub.Repository + ":" + name
 }
 
+// hubToken is the Docker Hub token: the stored one, else TokenEnv's value.
 func (d *Deployment) hubToken() string {
 	if t := strings.TrimSpace(d.DockerHub.Token); t != "" {
 		return t
@@ -238,10 +254,12 @@ func (d *Deployment) hubToken() string {
 	return strings.TrimSpace(os.Getenv(d.DockerHub.TokenEnv))
 }
 
+// configDir is the directory deployment.yaml (and the GCP key) live in.
 func (d *Deployment) configDir(m *Manager) string { return filepath.Dir(m.cfg.DeploymentFile) }
 
 // ---- runtime state: deployment.state.json ----
 
+// cloudState is what we last learned about one target's VM.
 type cloudState struct {
 	Instance string    `json:"instance"`
 	Zone     string    `json:"zone"`
@@ -250,12 +268,16 @@ type cloudState struct {
 	Updated  time.Time `json:"updated"`
 }
 
+// cloudStateMu serializes read-modify-write of deployment.state.json.
 var cloudStateMu sync.Mutex
 
+// cloudStateFile is deployment.state.json, beside deployment.yaml.
 func (m *Manager) cloudStateFile() string {
 	return filepath.Join(filepath.Dir(m.cfg.DeploymentFile), "deployment.state.json")
 }
 
+// loadCloudState reads every target's state, by target name (empty if the
+// file is missing or unreadable).
 func (m *Manager) loadCloudState() map[string]cloudState {
 	cloudStateMu.Lock()
 	defer cloudStateMu.Unlock()
@@ -311,6 +333,9 @@ func (m *Manager) cloudLeafURLs() map[string]string {
 
 // ---- HTTP ----
 
+// registerDeploymentRoutes adds the Deployment tab's read-only view of
+// deployment.yaml (with defaults, key status and each target's live state)
+// and the endpoint for messaging a cloud gateway.
 func registerDeploymentRoutes(mux *http.ServeMux, m *Manager) {
 	mux.HandleFunc("GET /api/deployment", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{"file": m.cfg.DeploymentFile, "editable": true}
@@ -388,6 +413,8 @@ func registerDeploymentRoutes(mux *http.ServeMux, m *Manager) {
 	})
 }
 
+// messageCloud publishes text into cloud target name's inbox, then pings
+// it to confirm it arrived, returning the ping reply.
 func (m *Manager) messageCloud(name, text string) (map[string]string, error) {
 	if m.nats == nil {
 		return nil, fmt.Errorf("nats not available")

@@ -13,3 +13,5 @@
 # Build outputs / deps of the dood console (rebuilt in the image)
 **/node_modules
 dev/dood/console/dist
+# Local gw-server build (the image compiles its own)
+dev/dood/server/gw

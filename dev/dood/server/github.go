@@ -23,12 +23,16 @@ import (
 	"time"
 )
 
+// githubAPI is the GitHub REST API base URL.
 const githubAPI = "https://api.github.com"
 
+// httpClient is shared by every outbound API call (GitHub, Docker Hub, GCP).
 var httpClient = &http.Client{Timeout: 60 * time.Second}
 
+// ghRepo is a GitHub repository, owner/name.
 type ghRepo struct{ Owner, Name string }
 
+// String is the repo as "owner/name".
 func (r ghRepo) String() string { return r.Owner + "/" + r.Name }
 
 // apiError is a non-2xx answer from GitHub or Docker Hub.
@@ -37,6 +41,8 @@ type apiError struct {
 	Body   string
 }
 
+// Error is "HTTP <status>: <message>", the message pulled out of the API's
+// JSON error body when there is one, and capped in length.
 func (e *apiError) Error() string {
 	msg := strings.TrimSpace(e.Body)
 	var v struct {
@@ -72,6 +78,7 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.Status, msg)
 }
 
+// isStatus reports whether err is an apiError with HTTP status code.
 func isStatus(err error, code int) bool {
 	ae, ok := err.(*apiError)
 	return ok && ae.Status == code
@@ -119,12 +126,17 @@ func doJSON(ctx context.Context, method, u string, hdr http.Header, body, out an
 // the only one used - never a silent fallback to the .env's GITHUB_TOKEN.
 type wsTokenKey struct{}
 
+// wsTokenVal is the value stored under wsTokenKey: the workspace's name and
+// its token.
 type wsTokenVal struct{ ws, tok string }
 
+// withWorkspaceToken marks ctx as acting for workspace ws, with its token.
 func withWorkspaceToken(ctx context.Context, ws, tok string) context.Context {
 	return context.WithValue(ctx, wsTokenKey{}, wsTokenVal{ws, tok})
 }
 
+// githubToken is the token a GitHub call uses: the workspace's own when ctx
+// carries one (an error if it's empty), else GITHUB_TOKEN from the env.
 func githubToken(ctx context.Context) (string, error) {
 	if v, ok := ctx.Value(wsTokenKey{}).(wsTokenVal); ok {
 		if v.tok == "" {
@@ -139,6 +151,7 @@ func githubToken(ctx context.Context) (string, error) {
 	return t, nil
 }
 
+// gh makes an authenticated JSON call to the GitHub REST API at path.
 func gh(ctx context.Context, method, path string, body, out any) error {
 	tok, err := githubToken(ctx)
 	if err != nil {
@@ -163,11 +176,15 @@ func ghLogin(ctx context.Context) (string, error) {
 	return u.Login, nil
 }
 
+// Patterns for GitHub owner/repo names and github.com remote URLs (HTTPS or
+// SSH), the latter capturing owner and name.
 var (
 	ghNameRE   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 	ghOriginRE = regexp.MustCompile(`github\.com[:/]+([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$`)
 )
 
+// parseGHRepo reads a repo from "owner/name", a github.com URL, or a bare
+// name (owner from GITHUB_ORG, else GITHUB_USER).
 func parseGHRepo(s string) (ghRepo, error) {
 	s = strings.TrimSpace(s)
 	if m := ghOriginRE.FindStringSubmatch(s); m != nil {
@@ -240,6 +257,7 @@ func ghTarget(j *jobRun) (ghRepo, error) {
 	return ghRepo{}, fmt.Errorf("no repo for project %q: it has no github.com origin - give a repo (owner/name)", j.project)
 }
 
+// ghRepoInfo is the subset of GitHub's repository object we read.
 type ghRepoInfo struct {
 	FullName      string `json:"full_name"`
 	HTMLURL       string `json:"html_url"`
@@ -248,6 +266,8 @@ type ghRepoInfo struct {
 	PushedAt      string `json:"pushed_at"`
 }
 
+// ghCheckRepo is the github/check_repo job: logs whether the repo exists
+// (and the token can see it), its visibility and default branch.
 func ghCheckRepo(ctx context.Context, j *jobRun) error {
 	r, err := ghTarget(j)
 	if err != nil {
@@ -270,6 +290,8 @@ func ghCheckRepo(ctx context.Context, j *jobRun) error {
 	return nil
 }
 
+// ghCreateRepo is the github/create_repo job: creates the repo with an
+// initial README, under the token's own account or an organization.
 func ghCreateRepo(ctx context.Context, j *jobRun) error {
 	r, err := ghTarget(j)
 	if err != nil {
@@ -316,14 +338,17 @@ func gitEnv(tok string) []string {
 	return env
 }
 
+// gitCmd runs git with a fixed context, log, environment and leading
+// arguments.
 type gitCmd struct {
 	ctx    context.Context
-	log    io.Writer
-	env    []string
-	pre    []string // --git-dir / --work-tree, or -C <dir>
-	editor bool     // run as the editor user, for anything that writes into a workspace
+	log    io.Writer // where run echoes the command and its output
+	env    []string  // process environment (see gitEnv)
+	pre    []string  // --git-dir / --work-tree, or -C <dir>
+	editor bool      // run as the editor user, for anything that writes into a workspace
 }
 
+// command builds the git process for args, without starting it.
 func (g gitCmd) command(args []string) *exec.Cmd {
 	cmd := exec.CommandContext(g.ctx, "git", append(append([]string{}, g.pre...), args...)...)
 	cmd.Env = g.env
@@ -334,6 +359,7 @@ func (g gitCmd) command(args []string) *exec.Cmd {
 	return cmd
 }
 
+// run runs git args with the command and its output written to g.log.
 func (g gitCmd) run(args ...string) error {
 	fmt.Fprintf(g.log, "$ git %s\n", strings.Join(args, " "))
 	cmd := g.command(args)
@@ -344,6 +370,7 @@ func (g gitCmd) run(args ...string) error {
 	return nil
 }
 
+// out runs git args and returns its combined, trimmed output.
 func (g gitCmd) out(args ...string) (string, error) {
 	var buf bytes.Buffer
 	cmd := g.command(args)
@@ -413,6 +440,8 @@ func ghSnapshot(ctx context.Context, j *jobRun, r ghRepo) (gitCmd, func(), error
 	return g, cleanup, nil
 }
 
+// ghDiffRepo is the github/diff_repo job: logs what push_branch would
+// commit, against the repo's default branch.
 func ghDiffRepo(ctx context.Context, j *jobRun) error {
 	r, err := ghTarget(j)
 	if err != nil {
@@ -436,8 +465,11 @@ func ghDiffRepo(ctx context.Context, j *jobRun) error {
 	return nil
 }
 
+// branchRE is the characters a branch name we accept may use.
 var branchRE = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
 
+// ghPushBranch is the github/push_branch job: commits the project's current
+// tree and pushes it as branch (default auto-update-<unix time>).
 func ghPushBranch(ctx context.Context, j *jobRun) error {
 	r, err := ghTarget(j)
 	if err != nil {
@@ -488,6 +520,8 @@ func ghPushBranch(ctx context.Context, j *jobRun) error {
 	return nil
 }
 
+// ghCreatePR is the github/create_pull_request job: opens a PR from branch
+// into the repo's default branch.
 func ghCreatePR(ctx context.Context, j *jobRun) error {
 	r, err := ghTarget(j)
 	if err != nil {
@@ -518,6 +552,7 @@ func ghCreatePR(ctx context.Context, j *jobRun) error {
 	return nil
 }
 
+// ghRenameBranch is the github/rename_branch job.
 func ghRenameBranch(ctx context.Context, j *jobRun) error {
 	r, err := ghTarget(j)
 	if err != nil {

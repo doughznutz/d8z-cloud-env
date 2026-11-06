@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// freePort is a localhost TCP port that was free a moment ago.
 func freePort(t *testing.T) int {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -78,6 +79,9 @@ func TestCloudLeafAuthAndPing(t *testing.T) {
 	t.Fatal("message never reached the cloud gateway's inbox")
 }
 
+// TestDeploymentDefaultsAndValidation checks that a missing or sparse
+// deployment.yaml is filled in from .env and defaults, and that invalid
+// targets and credentials paths are rejected.
 func TestDeploymentDefaultsAndValidation(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOCKER_HUB_USERNAME", "alice")

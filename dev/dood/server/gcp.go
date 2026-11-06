@@ -32,13 +32,18 @@ import (
 	"time"
 )
 
+// cloudStartupScript is the VM's startup-script metadata (cloud-startup.sh).
+//
 //go:embed cloud-startup.sh
 var cloudStartupScript string
 
+// gceNameRE is a valid GCE resource name (zone, machine type, instance).
 var gceNameRE = regexp.MustCompile(`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
+// computeAPI is the Compute Engine v1 REST base URL.
 const computeAPI = "https://compute.googleapis.com/compute/v1"
 
+// gcpClient is an authorized Compute Engine client for one project and zone.
 type gcpClient struct {
 	project, zone string
 	email         string
@@ -118,6 +123,8 @@ func (m *Manager) newGCP(ctx context.Context, d *Deployment) (*gcpClient, error)
 	return &gcpClient{project: g.Project, zone: g.Zone, email: key.ClientEmail, hdr: hdr}, nil
 }
 
+// do makes an authorized JSON call. path is relative to the project
+// ("/zones/..."), or a full https:// URL such as an operation's selfLink.
 func (c *gcpClient) do(ctx context.Context, method, path string, body, out any) error {
 	u := path
 	if !strings.HasPrefix(u, "https://") {
@@ -126,6 +133,7 @@ func (c *gcpClient) do(ctx context.Context, method, path string, body, out any) 
 	return doJSON(ctx, method, u, c.hdr, body, out)
 }
 
+// gceOperation is a Compute Engine long-running operation.
 type gceOperation struct {
 	Name     string `json:"name"`
 	SelfLink string `json:"selfLink"`
@@ -169,6 +177,7 @@ func (c *gcpClient) call(ctx context.Context, method, path string, body any) err
 	return c.wait(ctx, op)
 }
 
+// gceInstance is the subset of a Compute Engine instance we read.
 type gceInstance struct {
 	Name              string `json:"name"`
 	Status            string `json:"status"`
@@ -183,6 +192,7 @@ type gceInstance struct {
 	Labels map[string]string `json:"labels"`
 }
 
+// address is the VM's external (NAT) IP, or "" while it has none.
 func (i *gceInstance) address() string {
 	for _, n := range i.NetworkInterfaces {
 		for _, a := range n.AccessConfigs {
@@ -194,6 +204,7 @@ func (i *gceInstance) address() string {
 	return ""
 }
 
+// instancePath is instance name's API path in our zone.
 func (c *gcpClient) instancePath(name string) string {
 	return "/zones/" + c.zone + "/instances/" + name
 }
@@ -211,7 +222,10 @@ func (c *gcpClient) instance(ctx context.Context, name string) (*gceInstance, er
 	return &in, nil
 }
 
-func vmName(target string) string       { return "d8z-" + target }
+// vmName is the GCE instance name of a cloud target.
+func vmName(target string) string { return "d8z-" + target }
+
+// firewallName is the firewall rule (and network tag) of a cloud target.
 func firewallName(target string) string { return "d8z-gw-" + target }
 
 // ensureFirewall opens :80 and the NATS leaf port to the target's
@@ -273,6 +287,9 @@ func (m *Manager) cloudEnv(d *Deployment, t CloudTarget) (string, error) {
 	return b.String(), nil
 }
 
+// cloudMetadata is the instance metadata a target's VM boots from: the
+// startup script, its .env, image and profile. fingerprint is the current
+// metadata's, required by GCE when replacing it ("" on create).
 func (m *Manager) cloudMetadata(d *Deployment, t CloudTarget, fingerprint string) (map[string]any, error) {
 	env, err := m.cloudEnv(d, t)
 	if err != nil {
@@ -454,6 +471,8 @@ func (m *Manager) cloudRefresh(ctx context.Context, j *jobRun, c *gcpClient, t C
 	return in, nil
 }
 
+// cloudStatus is the cloud/status job: records the VM's state and, if it is
+// running, pings its gateway over NATS.
 func cloudStatus(ctx context.Context, j *jobRun) error {
 	_, t, c, err := j.m.cloudTarget(ctx, j)
 	if err != nil {
@@ -474,6 +493,7 @@ func cloudStatus(ctx context.Context, j *jobRun) error {
 	return nil
 }
 
+// cloudStart is the cloud/start job: starts the VM and waits for its gateway.
 func cloudStart(ctx context.Context, j *jobRun) error {
 	_, t, c, err := j.m.cloudTarget(ctx, j)
 	if err != nil {
@@ -486,6 +506,8 @@ func cloudStart(ctx context.Context, j *jobRun) error {
 	return j.m.cloudAwait(ctx, j, c, t)
 }
 
+// cloudStop is the cloud/stop job: stops the VM (releasing its address) and
+// drops our leaf link to it.
 func cloudStop(ctx context.Context, j *jobRun) error {
 	_, t, c, err := j.m.cloudTarget(ctx, j)
 	if err != nil {
@@ -500,6 +522,8 @@ func cloudStop(ctx context.Context, j *jobRun) error {
 	return err
 }
 
+// cloudDelete is the cloud/delete job: deletes the VM (with its boot disk)
+// and its firewall rule, and forgets its state.
 func cloudDelete(ctx context.Context, j *jobRun) error {
 	_, t, c, err := j.m.cloudTarget(ctx, j)
 	if err != nil {

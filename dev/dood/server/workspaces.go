@@ -34,15 +34,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Workspace is one entry of workspace.yaml.
 type Workspace struct {
-	Name     string `yaml:"name" json:"name"`
-	Source   string `yaml:"source" json:"source"`                     // github | local
-	Path     string `yaml:"path,omitempty" json:"path,omitempty"`     // local: directory under the projects root
-	Repo     string `yaml:"repo,omitempty" json:"repo,omitempty"`     // owner/name on github.com (optional for local)
-	Branch   string `yaml:"branch,omitempty" json:"branch,omitempty"` // branch to pull (blank: the repo's default)
-	Token    string `yaml:"token,omitempty" json:"-"`                 // GitHub token - never sent to the console
-	TokenEnv string `yaml:"token_env,omitempty" json:"tokenEnv,omitempty"`
-	Gateway  string `yaml:"gateway,omitempty" json:"gateway,omitempty"` // child gateway name (blank: derived from name)
+	Name     string `yaml:"name" json:"name"`                              // lowercase; also names its volume (d8zws-<name>)
+	Source   string `yaml:"source" json:"source"`                          // github | local
+	Path     string `yaml:"path,omitempty" json:"path,omitempty"`          // local: directory under the projects root
+	Repo     string `yaml:"repo,omitempty" json:"repo,omitempty"`          // owner/name on github.com (optional for local)
+	Branch   string `yaml:"branch,omitempty" json:"branch,omitempty"`      // branch to pull (blank: the repo's default)
+	Token    string `yaml:"token,omitempty" json:"-"`                      // GitHub token - never sent to the console
+	TokenEnv string `yaml:"token_env,omitempty" json:"tokenEnv,omitempty"` // or the env var holding it
+	Gateway  string `yaml:"gateway,omitempty" json:"gateway,omitempty"`    // child gateway name (blank: derived from name)
 
 	// The workspace's gateway: which services it runs beside its dood
 	// (bundle profiles; dozzle follows the one-per-daemon rule) and where.
@@ -52,7 +53,7 @@ type Workspace struct {
 	Docker   string    `yaml:"docker,omitempty" json:"docker"` // host | dind (blank: host)
 }
 
-// wsServices/wsDocker are a workspace's gateway spec with defaults applied.
+// wsServices is a workspace's gateway services with the default applied.
 func wsServices(w Workspace) []string {
 	if w.Services == nil {
 		return []string{"deightz"}
@@ -60,6 +61,7 @@ func wsServices(w Workspace) []string {
 	return append([]string{}, (*w.Services)...)
 }
 
+// wsDocker is a workspace's gateway docker mode with the default applied.
 func wsDocker(w Workspace) string {
 	if w.Docker == "" {
 		return "host"
@@ -67,6 +69,7 @@ func wsDocker(w Workspace) string {
 	return w.Docker
 }
 
+// wsFile is the whole of workspace.yaml.
 type wsFile struct {
 	Workspaces []Workspace `yaml:"workspaces"`
 }
@@ -88,6 +91,8 @@ type wsAssignment struct {
 	Mount wsMount `json:"mount"`           // the same mount, for its Deightz
 }
 
+// Validation patterns for a workspace's name, its owner/name repo, and
+// environment variable names (token_env and the like).
 var (
 	wsNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	wsRepoRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$`)
@@ -143,6 +148,7 @@ func (s *wsStore) load() ([]Workspace, bool, error) {
 	return f.Workspaces, true, nil
 }
 
+// get looks up one workspace by name.
 func (s *wsStore) get(name string) (Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,6 +164,8 @@ func (s *wsStore) get(name string) (Workspace, error) {
 	return Workspace{}, fmt.Errorf("no workspace %q", name)
 }
 
+// wsFileHeader is written at the top of every workspace.yaml we save, as a
+// worked example of the format.
 const wsFileHeader = `# D8Z workspaces - managed by the gateway console (Workspaces tab).
 # This file holds GitHub tokens: keep it outside every repository.
 #
@@ -229,6 +237,8 @@ func writeConfigFile(file string, content []byte) error {
 // onto the new config (Manager.configChanged).
 var onConfigWrite func()
 
+// update loads the workspaces, applies fn and saves the result, under the
+// store's lock.
 func (s *wsStore) update(fn func([]Workspace) ([]Workspace, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,6 +253,9 @@ func (s *wsStore) update(fn func([]Workspace) ([]Workspace, error)) error {
 	return s.save(list)
 }
 
+// validateWorkspace trims and checks w in place, and normalizes it: a
+// pasted clone URL becomes owner/name, and default values are cleared so
+// the file stays minimal.
 func (m *Manager) validateWorkspace(w *Workspace) error {
 	w.Name = strings.TrimSpace(w.Name)
 	w.Path = strings.TrimSpace(w.Path)
@@ -344,8 +357,10 @@ func wsMountName(w Workspace) string {
 	return w.Name
 }
 
+// wsVolume is a github workspace's docker volume.
 func wsVolume(w Workspace) string { return "d8zws-" + w.Name }
 
+// wsTarget is where a workspace is mounted inside its containers.
 func wsTarget(w Workspace) string {
 	return "/home/" + getenv("USER", "abc") + "/projects/" + wsMountName(w)
 }
@@ -392,7 +407,7 @@ func prepareWorkspaceDir(a *wsAssignment) {
 	}
 }
 
-// editorUID/GID own workspace files: Deightz's PUID/PGID.
+// editorUID and editorGID own workspace files: Deightz's PUID/PGID.
 const editorUID, editorGID = 1000, 1000
 
 // wsGitState describes a checkout from its .git directory alone (no git
@@ -489,6 +504,8 @@ type wsInput struct {
 	ClearToken bool      `json:"clearToken"` // drop the stored token
 }
 
+// addWorkspace validates and adds a new workspace, refusing a duplicate
+// name or gateway name.
 func (m *Manager) addWorkspace(in wsInput) error {
 	w := in.Workspace
 	w.Token = strings.TrimSpace(in.Token)
@@ -509,6 +526,8 @@ func (m *Manager) addWorkspace(in wsInput) error {
 	})
 }
 
+// editWorkspace replaces workspace name's settings. Its name can't change,
+// and its stored token is kept unless a new one is given or it's cleared.
 func (m *Manager) editWorkspace(name string, in wsInput) error {
 	return m.ws.update(func(list []Workspace) ([]Workspace, error) {
 		for i, o := range list {
@@ -565,6 +584,8 @@ func (m *Manager) removeWorkspace(ctx context.Context, name string, purge bool) 
 	})
 }
 
+// registerWorkspaceRoutes adds the Workspaces tab's endpoints: list, add,
+// edit and remove workspaces, and start a workspace's gateway.
 func registerWorkspaceRoutes(mux *http.ServeMux, m *Manager) {
 	mux.HandleFunc("GET /api/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := m.listWorkspaces(r.Context())

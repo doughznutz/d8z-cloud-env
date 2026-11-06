@@ -22,6 +22,10 @@
 #   so gw-server can start exactly one. They still build from source (the
 #   dood image carries the repo in /self, so that works in the cloud too).
 #
+#   carol is also optional (profile `carol`) but, for now, is started by
+#   hand with `docker compose --profile carol up -d` - it isn't wired into
+#   the console's Control tab yet.
+#
 # The `dind` service is only an extends-template for a spawned gateway
 # bundle's sidecar (dev/dood/bundle/compose.yaml); nothing starts it here.
 
@@ -93,6 +97,10 @@ services:
       # NATS leafnode listener. Loopback-only by default; a cloud gateway
       # sets GW_NATS_PUBLISH=7422 so its parent can dial in (with auth).
       - "${GW_NATS_PUBLISH:-127.0.0.1:7422}:7422"
+      # NATS plain client listener (dev/dood/server/nats.go). Unauthenticated,
+      # so loopback-only by default; other containers (e.g. gopher's chat
+      # tab) reach it over internal_net as dood:4222 without this publish.
+      - "${GW_NATS_CLIENT_PUBLISH:-127.0.0.1:4222}:4222"
     networks:
       internal_net:
       external_net: {}   # internal_net alone is `internal: true` and silently drops the port publish
@@ -160,9 +168,36 @@ services:
     build:
       context: ./dev/gopher
     env_file: ./.env
+    environment:
+      # dood's plain NATS client listener (dev/dood/server/nats.go),
+      # reachable by its container name on internal_net.
+      - GOPHER_NATS_URL=nats://dood:4222
     volumes:
       - gopher-data:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      internal_net:
+      external_net: {}
+
+  # Carol - documentation generator: runs each language's own doc tool
+  # (go doc, typedoc, pdoc) against this workspace's source and writes the
+  # output to a volume, never back into the repo. Source is mounted
+  # read-only; only /data is writable.
+  carol:
+    image: dev:carol
+    profiles: [carol]
+    container_name: carol
+    build:
+      context: ./dev/carol
+    env_file: ./.env
+    environment:
+      - CAROL_SOURCE_DIR=/home/${USER}/projects/${PROJECT}
+      # dood's plain NATS client listener (dev/dood/server/nats.go),
+      # reachable by its container name on internal_net.
+      - CAROL_NATS_URL=nats://dood:4222
+    volumes:
+      - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT:ro
+      - carol-docs:/data
     networks:
       internal_net:
       external_net: {}
@@ -204,6 +239,7 @@ networks:
 volumes:
   og-ollama-data:
   gopher-data:
+  carol-docs:
   dind-sock:
   dind-data:
   d8z-nats:

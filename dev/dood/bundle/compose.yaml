@@ -12,9 +12,9 @@
 # entry: its Traefik (host bundle) or its dind sidecar (dind bundle).
 #
 # Profiles pick the mix (dood always runs):
-#   deightz, og, gopher, dozzle - no dependencies, but one dozzle per docker
-#   daemon: a dind bundle always gets one, a host bundle never does (it
-#   shares, and links to, the dozzle of the daemon it runs on)
+#   deightz, og, gopher, carol, dozzle - no dependencies, but one dozzle per
+#   docker daemon: a dind bundle always gets one, a host bundle never does
+#   (it shares, and links to, the dozzle of the daemon it runs on)
 #
 # A dind bundle is two-stage, both stages using this file:
 #   1. on the parent's daemon: only `dind` (profile dind), on gwlink
@@ -84,6 +84,13 @@ services:
     profiles: !override [gopher]
     networks: !override [internal_net, external_net]
 
+  carol:
+    extends: { file: ../../../docker-compose.yaml, service: carol }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [carol]
+    networks: !override [internal_net, external_net]
+
   # The dind sidecar (stage 1 of a dind bundle). Its API is on tcp:2375
   # without TLS: reachable only on gwlink (parent Traefik + this) and the
   # bundle's own egress network (nothing else on it).
@@ -112,6 +119,7 @@ networks:
 volumes:
   og-ollama-data:
   gopher-data:
+  carol-docs:
   dind-data:
   # A manager child's own workspace.yaml (project-scoped: never the root's).
   # A workspace gateway doesn't get one - its override replaces the
