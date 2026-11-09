@@ -215,3 +215,21 @@ nav .confirm { display: block; padding: 2px 10px 8px 38px; white-space: normal; 
 nav ul.bottom { margin-top: auto; padding-top: 8px; }
 nav ul.bottom + footer { margin-top: 0; }
 .section .count { float: right; font-weight: normal; text-transform: none; letter-spacing: 0; }
+.section-action { float: right; margin-left: 2px; font-size: 13px; }
+
+/* RowMenu: a small "⋮" dropdown for a sidebar row's actions */
+.row-menu-wrap { position: relative; display: inline-flex; }
+.row-menu-trigger { font-size: 14px; }
+.row-menu {
+  position: absolute; top: 100%; right: 0; z-index: 20; margin: 2px 0 0; padding: 4px;
+  min-width: 140px; list-style: none; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .18);
+}
+.row-menu li { position: static; }
+.row-menu a, .row-menu button {
+  display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--text);
+  padding: 5px 8px; border-radius: 4px; font-size: 13px; text-decoration: none; cursor: pointer;
+}
+.row-menu a:hover, .row-menu button:hover:not(:disabled) { background: var(--hover); }
+.row-menu a[aria-disabled="true"], .row-menu button:disabled { color: var(--muted); cursor: default; }
+.row-menu .danger { color: var(--bad); }

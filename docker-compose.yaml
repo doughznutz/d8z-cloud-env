@@ -195,9 +195,46 @@ services:
       # dood's plain NATS client listener (dev/dood/server/nats.go),
       # reachable by its container name on internal_net.
       - CAROL_NATS_URL=nats://dood:4222
+      # Report runs go to carol-agents below; agents never run in here.
+      - CAROL_AGENTS_URL=http://carol-agents:8519
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT:ro
       - carol-docs:/data
+      # Run history and report runs - kept off /data, which is served (and
+      # what's served, the report agents can read).
+      - carol-state:/state
+      # Carol's settings and prompt presets (dev/carol/server/settings.py),
+      # in the same host config dir dood mounts as /etc/d8z - but only this
+      # one file, since the rest of it holds tokens and keys. Create it
+      # first (even empty): a missing source becomes a root-owned directory.
+      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}/carol.yaml:/etc/d8z/carol.yaml
+    depends_on: [carol-agents]
+    networks:
+      internal_net:
+      external_net: {}
+
+  # Carol's agent runner (dev/carol/server/agent_runner.py): the LLM CLIs
+  # behind carol's Reports tab run here, not in carol, so they can't stray
+  # outside the generated docs. They read the docs only as plain text from
+  # carol's doc server (http://carol:8503/.../docs/...?format=text), so this
+  # mounts nothing at all - no docs, no workspace source, no carol state -
+  # and gets the LLM keys alone, not the whole .env. Each CLI's own limits
+  # (curl to the doc server, nothing else) are in dev/carol/agent-config/.
+  carol-agents:
+    image: dev:carol
+    profiles: [carol]
+    container_name: carol-agents
+    build:
+      context: ./dev/carol
+    working_dir: /app
+    entrypoint: ["python3", "-m", "server.agent_runner"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CODEX_API_KEY=${CODEX_API_KEY:-}
     networks:
       internal_net:
       external_net: {}
@@ -240,6 +277,7 @@ volumes:
   og-ollama-data:
   gopher-data:
   carol-docs:
+  carol-state:
   dind-sock:
   dind-data:
   d8z-nats:

@@ -31,3 +31,13 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 module = "streamlit.*"
 ignore_missing_imports = true
+
+# Carol's behaviour tests (tests/README.md). Run from /app inside the image.
+# Each suite needs a different environment, so none run unless named:
+# tests/build in `docker build`, tests/system in carol-agents, tests/live in
+# carol (see tests/run.sh).
+[tool.pytest.ini_options]
+addopts = "-ra"
+markers = [
+  "live: calls a real, local agent (cn via og) - never a paid one",
+]

@@ -126,10 +126,16 @@ export interface JobRun {
 /** The hash-derived page the console is currently showing. */
 export type Route =
   | { kind: "loading" }
-  | { kind: "workspaces" }
   | { kind: "jobs" }
   | { kind: "control" }
+  /** A configured workspace's tab. `mode` undefined: the natural default
+   *  (settings if no live gateway is running, the iframe if one is).
+   *  "settings"/"edit" and "log" are explicit, sticky overrides set by the
+   *  row's dropdown menu; "log" auto-clears once the gateway comes up. */
+  | { kind: "ws"; name: string; mode?: "settings" | "edit" | "log" }
+  | { kind: "ws-new" }
   | { kind: "gw"; name: string; info: boolean }
+  | { kind: "gw-new" }
   | { kind: "svc"; id: string };
 
 /**

@@ -1,6 +1,13 @@
-import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { WorkspacesPage } from "./Workspaces";
+import {
+  AdHocLaunchPage,
+  OwnWorkspacePanel,
+  WorkspaceAddPage,
+  WorkspaceDetails,
+  WorkspacePending,
+  WorkspaceStartLog,
+} from "./Workspaces";
 import { StopConfirm } from "./StopConfirm";
 import { DeploymentPage } from "./Deployment";
 import { api } from "./api";
@@ -8,6 +15,9 @@ import { Messenger, ParentAndSiblings } from "./Messenger";
 import { JobRow } from "./JobRow";
 import { isUp, health } from "./health";
 import { LogView } from "./LogView";
+import { ServicesTable } from "./ServicesTable";
+import { GatewayLivePanel } from "./GatewayLivePanel";
+import { RowMenu } from "./RowMenu";
 import type { Gateway, Job, JobRun, Request, Route, Self, ServiceStatus, WorkspaceInfo } from "./types";
 
 // Sub-apps this console knows how to show; which ones appear comes from
@@ -159,13 +169,17 @@ export default function App() {
     [self]
   );
 
-  // Routes: "<service>", "control" (old "status"), "workspaces", "jobs",
-  // "gw/<name>", "gw/<name>/info". ("new" - the old New gateway page - now lands on
-  // Workspaces, where gateways are started.)
+  // Routes: "<service>", "control" (old "status"), "jobs", "ws-new", "gw-new",
+  // "ws/<name>", "ws/<name>/settings|edit|log", "gw/<name>", "gw/<name>/info".
   const route = useMemo<Route>(() => {
-    if (hash === "workspaces" || hash === "new") return { kind: "workspaces" };
     if (hash === "jobs") return { kind: "jobs" };
     if (hash === "control" || hash === "status") return { kind: "control" };
+    if (hash === "ws-new") return { kind: "ws-new" };
+    if (hash === "gw-new" || hash === "new") return { kind: "gw-new" };
+    if (hash.startsWith("ws/")) {
+      const [name, sub] = hash.slice(3).split("/");
+      return { kind: "ws", name, mode: sub === "settings" || sub === "edit" || sub === "log" ? sub : undefined };
+    }
     if (hash.startsWith("gw/")) {
       const [name, sub] = hash.slice(3).split("/");
       return { kind: "gw", name, info: sub === "info" };
@@ -175,6 +189,7 @@ export default function App() {
   }, [hash, services, self]);
 
   const current = route.kind === "gw" ? gateways.find((g) => g.name === route.name) : null;
+  const currentWs = route.kind === "ws" ? (wsInfo?.workspaces || []).find((w) => w.name === route.name) : null;
   const currentSvc = route.kind === "svc" ? services.find((s) => s.id === route.id) : null;
   // A service whose container we can see but isn't running gets a status
   // panel with its logs instead of an iframe full of 502s.
@@ -189,7 +204,9 @@ export default function App() {
       ? `svc:${route.id}`
       : route.kind === "gw" && !route.info && current?.state === "running"
         ? `gw:${current.name}`
-        : null;
+        : route.kind === "ws" && !route.mode && currentWs?.gw?.state === "running"
+          ? `gw:${currentWs.gw.name}`
+          : null;
   useEffect(() => {
     if (activeFrame && !visited[activeFrame]) setVisited((v) => ({ ...v, [activeFrame]: true }));
   }, [activeFrame, visited]);
@@ -201,6 +218,14 @@ export default function App() {
       return Object.keys(next).length === Object.keys(v).length ? v : next;
     });
   }, [gateways]);
+
+  // "Start" leaves the route pinned to the build log until the gateway
+  // comes up, then drops back to the tab's natural default (the iframe).
+  useEffect(() => {
+    if (route.kind === "ws" && route.mode === "log" && currentWs?.gw?.state === "running") {
+      location.hash = `ws/${route.name}`;
+    }
+  }, [route, currentWs]);
 
   const frames = [
     ...services.map((s) => ({ key: `svc:${s.id}`, src: s.path, title: s.name })),
@@ -217,13 +242,17 @@ export default function App() {
         ? SERVICES[route.id]?.name
         : route.kind === "gw"
           ? `gw/${route.name}`
-          : route.kind === "workspaces"
-            ? "Workspaces"
-            : route.kind === "jobs"
-              ? "Deployment"
-              : route.kind === "control"
-                ? "Control"
-                : "";
+          : route.kind === "ws"
+            ? route.name
+            : route.kind === "ws-new"
+              ? "Add workspace"
+              : route.kind === "gw-new"
+                ? "Launch gateway"
+                : route.kind === "jobs"
+                  ? "Deployment"
+                  : route.kind === "control"
+                    ? "Control"
+                    : "";
     document.title = `D8Z ${self && self.id !== "root" ? `[${self.id}] ` : ""}· ${label}`;
   }, [route, self]);
 
@@ -241,6 +270,11 @@ export default function App() {
         onToggle={() => setCollapsed(!collapsed)}
         popout={popout}
         refresh={refresh}
+        refreshSelf={refreshSelf}
+        onWsChanged={() => {
+          void refreshWorkspaces();
+          void refresh();
+        }}
         onReload={activeFrame ? () => setReloads((r) => ({ ...r, [activeFrame]: (r[activeFrame] || 0) + 1 })) : null}
       />
       <main title="Main canvas — shows the selected service, gateway, or panel">
@@ -250,21 +284,10 @@ export default function App() {
         {!activeFrame && (
           <div className="panel-wrap" title="Panel area — forms and status pages that aren't an embedded sub-app">
             {selfErr && <div className="banner error">Console API unreachable: {selfErr}</div>}
-            {route.kind === "workspaces" && self && (
-              <WorkspacesPage
-                info={wsInfo}
-                err={wsErr}
-                onChanged={() => {
-                  void refreshWorkspaces();
-                  void refresh();
-                }}
-                self={self}
-                gateways={gateways}
-              />
-            )}
             {route.kind === "control" && self && (
               <ControlPage
                 self={self}
+                wsInfo={wsInfo}
                 gateways={gateways}
                 gwErr={gwErr}
                 refreshSelf={refreshSelf}
@@ -275,6 +298,51 @@ export default function App() {
             )}
             {route.kind === "svc" && svcDown && currentSvc?.status && <ServiceDown svc={{ ...currentSvc, status: currentSvc.status }} />}
             {route.kind === "gw" && <GatewayDetails name={route.name} gw={current} gwErr={gwErr} />}
+            {route.kind === "ws" &&
+              (wsErr ? (
+                <div className="panel wide">
+                  <div className="banner error">Can't load workspaces: {wsErr}</div>
+                </div>
+              ) : !currentWs ? (
+                <div className="panel wide">
+                  <h2>{route.name}</h2>
+                  <p className="muted">This workspace doesn't exist (any more).</p>
+                </div>
+              ) : route.mode === "log" ? (
+                <WorkspaceStartLog ws={currentWs} />
+              ) : (
+                <WorkspaceDetails
+                  key={route.name}
+                  ws={currentWs}
+                  mode={route.mode === "edit" ? "edit" : undefined}
+                  dirs={wsInfo?.dirs || []}
+                  profiles={self?.profiles || []}
+                  onChanged={() => {
+                    void refreshWorkspaces();
+                    void refresh();
+                  }}
+                />
+              ))}
+            {route.kind === "ws-new" && (
+              <WorkspaceAddPage
+                dirs={wsInfo?.dirs || []}
+                profiles={self?.profiles || []}
+                onChanged={() => {
+                  void refreshWorkspaces();
+                  void refresh();
+                }}
+              />
+            )}
+            {route.kind === "gw-new" && (
+              <AdHocLaunchPage
+                own={wsInfo?.own && !wsInfo.own.pending ? wsInfo.own : null}
+                self={self}
+                onChanged={() => {
+                  void refreshWorkspaces();
+                  void refresh();
+                }}
+              />
+            )}
             {route.kind === "jobs" && self && <DeploymentPage catalog={jobsCatalog} runs={jobRuns} onRan={refreshJobRuns} />}
             {route.kind === "loading" && !selfErr && <p className="muted">Loading…</p>}
           </div>
@@ -294,13 +362,40 @@ interface SidebarProps {
   onToggle: () => void;
   popout: string | null;
   refresh: () => Promise<void>;
+  refreshSelf: () => Promise<void>;
+  onWsChanged: () => void;
   onReload: (() => void) | null;
 }
 
-function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle, popout, refresh, onReload }: SidebarProps) {
-  const [confirm, setConfirm] = useState<string | null>(null);
+// A confirm-inline (Stop or Remove) replacing one row's actions, keyed by
+// its sidebar row key ("ws:<name>" or "gw:<name>").
+type RowConfirm = { key: string; kind: "stop" | "remove" } | null;
+
+function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle, popout, refresh, refreshSelf, onWsChanged, onReload }: SidebarProps) {
+  const [confirm, setConfirm] = useState<RowConfirm>(null);
+  const [purge, setPurge] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const own = health(self?.bundle);
+
+  const localCatalog = useMemo(() => Object.fromEntries((self?.localServices || []).map((s) => [s.name, s])), [self?.localServices]);
+  const localOps = self?.localOps || {};
+  const [svcBusy, setSvcBusy] = useState<string | null>(null);
+
+  async function toggleLocal(svc: string, running: boolean) {
+    setErr(null);
+    setSvcBusy(svc);
+    try {
+      await (running ? api.stopLocal(svc) : api.startLocal(svc));
+    } catch (e) {
+      setErr(`${svc}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    setSvcBusy(null);
+    void refreshSelf();
+  }
+
+  // Compose services this bundle knows how to start but hasn't yet created
+  // a container for at all (as opposed to one that's merely stopped).
+  const startable = Object.keys(localCatalog).filter((n) => !(self?.bundle || []).some((b) => b.service === n));
 
   async function stop(name: string, action: Parameters<typeof api.stop>[1]) {
     setConfirm(null);
@@ -312,6 +407,33 @@ function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle,
     }
     void refresh();
   }
+
+  async function startWs(name: string) {
+    setErr(null);
+    try {
+      await api.startWorkspaceGateway(name);
+      // eslint-disable-next-line react-hooks/immutability -- navigating via `location.hash` after an async action completes, same as every other `location.hash =` in this migration; the compiler's heuristic only flags this one occurrence of the pattern.
+      location.hash = `ws/${name}/log`;
+    } catch (e) {
+      setErr(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    onWsChanged();
+  }
+
+  async function removeWs(name: string) {
+    setConfirm(null);
+    setErr(null);
+    try {
+      await api.removeWorkspace(name, purge);
+    } catch (e) {
+      setErr(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    onWsChanged();
+  }
+
+  const managedNames = new Set((wsInfo?.workspaces || []).map((w) => w.gateway));
+  const adHoc = gateways.filter((g) => !managedNames.has(g.name));
+  const wsRunning = (wsInfo?.workspaces || []).filter((w) => w.gw).length + adHoc.length;
 
   return (
     <nav className={collapsed ? "collapsed" : ""} title="Sidebar — navigation for this gateway">
@@ -357,57 +479,158 @@ function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle,
 
       <div className="section" title="Services section — this bundle's sub-apps (deightz, dozzle, …)">
         Services <span className="count">{self ? `${own.up}/${own.total}` : "…"}</span>
+        <RowMenu
+          className="section-action"
+          icon="+"
+          title="Start a service"
+          items={
+            startable.length > 0
+              ? startable.map((n) => ({ label: SERVICES[n]?.name || n, onClick: () => void toggleLocal(n, false) }))
+              : [{ label: "Nothing to start", disabled: true }]
+          }
+        />
       </div>
       <ul>
-        {services.map((s) => (
-          <li key={s.id}>
-            <a
-              href={`#${s.id}`}
-              className={route.kind === "svc" && route.id === s.id ? "active" : ""}
-              title={`${s.name}${s.status ? ` (${s.status.status})` : ""}`}
-            >
-              <span className="ico">{s.ico}</span>
-              <span className="label">
-                {s.name}
-                <small className={s.status && !isUp(s.status) ? "error-text" : ""}>{s.status && !isUp(s.status) ? s.status.status : s.desc}</small>
-              </span>
-              {s.status && <span className={`dot small ${isUp(s.status) ? "running" : s.status.state}`} />}
-            </a>
-          </li>
-        ))}
+        {services.map((s) => {
+          const svc = localCatalog[s.compose];
+          const op = localOps[s.compose];
+          const opBusy = op && (op.state === "starting" || op.state === "stopping");
+          const running = !!(s.status && isUp(s.status));
+          return (
+            <li key={s.id} className="gw-item">
+              <a
+                href={`#${s.id}`}
+                className={route.kind === "svc" && route.id === s.id ? "active" : ""}
+                title={`${s.name}${s.status ? ` (${s.status.status})` : ""}`}
+              >
+                <span className="ico">{s.ico}</span>
+                <span className="label">
+                  {s.name}
+                  <small className={s.status && !isUp(s.status) ? "error-text" : ""}>
+                    {s.status && !isUp(s.status) ? s.status.status : s.desc}
+                  </small>
+                </span>
+                {s.status && <span className={`dot small ${isUp(s.status) ? "running" : s.status.state}`} />}
+              </a>
+              {svc && (
+                <span className="row-actions label">
+                  <RowMenu
+                    title={`Actions for ${s.name}`}
+                    items={[
+                      {
+                        label: opBusy ? op.phase || op.state : running ? "Stop" : "Start",
+                        disabled: svcBusy === s.compose || !!opBusy,
+                        onClick: () => void toggleLocal(s.compose, running),
+                      },
+                    ]}
+                  />
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       <div
         className="section"
-        title="Workspaces section — each workspace's own gateway (its editor and repository tools), cascaded under /gw/<name>/"
+        title="Workspaces section — each configured and ad hoc workspace gateway, cascaded under /gw/<name>/"
       >
-        Workspaces
+        Workspaces <span className="count">{wsInfo ? `${wsRunning} running` : "…"}</span>
+        <a className="icon-btn section-action" href="#gw-new" title="Launch an ad hoc gateway">
+          ⌁
+        </a>
+        <a className="icon-btn section-action" href="#ws-new" title="Add a workspace">
+          +
+        </a>
       </div>
       <ul>
-        <li>
-          <a
-            href="#workspaces"
-            className={route.kind === "workspaces" ? "active" : ""}
-            title="This gateway's own workspace (if any), the workspaces it manages, and ad hoc child gateways"
-          >
-            <span className="ico">▤</span>
-            <span className="label">
-              Manage workspaces
-              <small>
-                {self?.workspace ? `on ${self.workspace.name} · ` : ""}
-                {wsInfo?.workspaces
-                  ? `${wsInfo.workspaces.length} configured · ${wsInfo.workspaces.filter((w) => w.gw).length} running`
-                  : "…"}
-              </small>
-            </span>
-          </a>
-        </li>
-        {gateways.map((g) => {
+        {(wsInfo?.workspaces || []).map((w) => {
+          const gw = w.gw;
+          const key = `ws:${w.name}`;
+          const h = gw ? health(gw.services) : null;
+          const busy = gw && (gw.state === "starting" || gw.state === "stopping");
+          const dot = !gw ? "" : gw.state === "running" && h?.degraded ? "degraded" : gw.state;
+          const running = gw?.state === "running";
+          return (
+            <li key={key} className="gw-item">
+              <a
+                href={`#ws/${w.name}`}
+                className={route.kind === "ws" && route.name === w.name ? "active" : ""}
+                title={`${w.name} (${w.source}): ${gw ? gw.phase || gw.state : "not running"}`}
+              >
+                <span className="ico">
+                  <span className={`dot ${dot}`} />
+                </span>
+                <span className="label">
+                  {w.name}
+                  <small className={gw?.state === "error" || (gw?.state === "running" && h?.degraded) ? "error-text" : ""}>
+                    {!gw
+                      ? "not running"
+                      : busy
+                        ? gw.phase || gw.state
+                        : gw.state === "error"
+                          ? "failed to start"
+                          : `${gw.state} · ${h?.up}/${h?.total} up · ${gw.docker}`}
+                  </small>
+                </span>
+              </a>
+              {confirm?.key === key ? (
+                <div className="confirm label">
+                  {confirm.kind === "stop" && gw ? (
+                    <StopConfirm gw={gw} compact onStop={(action) => stop(gw.name, action)} onKeep={() => setConfirm(null)} />
+                  ) : (
+                    <span className="confirm-inline">
+                      {w.source === "github" && (
+                        <label className="check" title={`Also delete the d8zws-${w.name} volume and everything in it`}>
+                          <input type="checkbox" checked={purge} onChange={(e) => setPurge(e.target.checked)} /> delete volume
+                        </label>
+                      )}
+                      <button className="danger" onClick={() => removeWs(w.name)}>
+                        Remove
+                      </button>
+                      <button onClick={() => setConfirm(null)}>Keep</button>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span className="row-actions label">
+                  <RowMenu
+                    title={`Actions for ${w.name}`}
+                    items={[
+                      { label: "Settings", href: `#ws/${w.name}/settings` },
+                      ...(!gw ? [{ label: "Start", onClick: () => void startWs(w.name) }] : []),
+                      { label: "View", href: `#ws/${w.name}`, disabled: !running },
+                      { label: "Edit", href: `#ws/${w.name}/edit` },
+                      ...(gw && gw.state !== "stopping"
+                        ? [{ label: "Stop", onClick: () => setConfirm({ key, kind: "stop" }) }]
+                        : []),
+                      ...(!gw
+                        ? [
+                            {
+                              label: "Remove",
+                              danger: true,
+                              onClick: () => {
+                                setPurge(false);
+                                setConfirm({ key, kind: "remove" });
+                              },
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
+                </span>
+              )}
+            </li>
+          );
+        })}
+        {adHoc.map((g) => {
           const h = health(g.services);
           const busy = g.state === "starting" || g.state === "stopping";
           const dot = g.state === "running" && h.degraded ? "degraded" : g.state;
+          const key = `gw:${g.name}`;
+          const running = g.state === "running";
           return (
-            <li key={g.name} className="gw-item">
+            <li key={key} className="gw-item">
               <a
                 href={`#gw/${g.name}`}
                 className={route.kind === "gw" && route.name === g.name ? "active" : ""}
@@ -423,20 +646,20 @@ function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle,
                   </small>
                 </span>
               </a>
-              {confirm === g.name ? (
+              {confirm?.key === key ? (
                 <div className="confirm label">
                   <StopConfirm gw={g} compact onStop={(action) => stop(g.name, action)} onKeep={() => setConfirm(null)} />
                 </div>
               ) : (
                 <span className="row-actions label">
-                  <a className="icon-btn" href={`#gw/${g.name}/info`} title={`Details for ${g.name}`}>
-                    ⓘ
-                  </a>
-                  {g.state !== "stopping" && (
-                    <button className="icon-btn stop" title={`Stop and remove ${g.name}`} onClick={() => setConfirm(g.name)}>
-                      ■
-                    </button>
-                  )}
+                  <RowMenu
+                    title={`Actions for ${g.name}`}
+                    items={[
+                      { label: "Settings", href: `#gw/${g.name}/info` },
+                      { label: "View", href: `#gw/${g.name}`, disabled: !running },
+                      ...(g.state !== "stopping" ? [{ label: "Stop", onClick: () => setConfirm({ key, kind: "stop" }) }] : []),
+                    ]}
+                  />
                 </span>
               )}
             </li>
@@ -471,41 +694,9 @@ function Sidebar({ self, services, gateways, wsInfo, route, collapsed, onToggle,
   );
 }
 
-interface ServicesTableProps {
-  services: ServiceStatus[];
-  logsFor: (svc: string) => () => Promise<string>;
-  actions?: (s: ServiceStatus) => ReactNode | null;
-}
-
-// ServicesTable lists a bundle's containers with expandable logs. `actions`,
-// if given, renders extra controls (e.g. start/stop) into a row's head.
-function ServicesTable({ services, logsFor, actions }: ServicesTableProps) {
-  const [open, setOpen] = useState<string | null>(null);
-  if (!services || services.length === 0) return <p className="muted">No containers yet.</p>;
-  return (
-    <div className="svc-table">
-      {services.map((s) => (
-        <div key={s.container} className={`svc-row ${open === s.service ? "open" : ""}`}>
-          <div className="svc-head">
-            <span className={`dot ${s.state === "absent" ? "" : isUp(s) ? (s.status.includes("unhealthy") ? "degraded" : "running") : s.state}`} />
-            <code>{s.service}</code>
-            <span className={`svc-status ${isUp(s) ? "muted" : "error-text"}`}>{s.status}</span>
-            {actions && actions(s)}
-            {s.state !== "absent" && (
-              <button className="link-btn" onClick={() => setOpen(open === s.service ? null : s.service)}>
-                {open === s.service ? "Hide logs" : "Logs"}
-              </button>
-            )}
-          </div>
-          {open === s.service && <LogView load={logsFor(s.service)} live={isUp(s) || s.state === "restarting"} />}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ControlPage({
   self,
+  wsInfo,
   gateways,
   gwErr,
   refreshSelf,
@@ -514,6 +705,7 @@ function ControlPage({
   onRan,
 }: {
   self: Self;
+  wsInfo: WorkspaceInfo | null;
   gateways: Gateway[];
   gwErr: string | null;
   refreshSelf: () => Promise<void>;
@@ -522,53 +714,11 @@ function ControlPage({
   onRan: () => void;
 }) {
   const logsFor = useCallback((svc: string) => () => api.serviceLogs(svc), []);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
   const wsJobs = useMemo(() => (catalog || []).filter((j) => j.workspace), [catalog]);
   const first = ["pull", "diff_repo", "push_branch", "create_pull_request"];
   const mainJobs = first.map((n) => wsJobs.find((j) => j.name === n)).filter((j): j is Job => !!j);
   const moreJobs = wsJobs.filter((j) => !first.includes(j.name));
-
-  const localCatalog = useMemo(() => Object.fromEntries((self.localServices || []).map((s) => [s.name, s])), [self.localServices]);
-  const localOps = self.localOps || {};
-  const bundleRows = useMemo<ServiceStatus[]>(() => {
-    const present = new Set((self.bundle || []).map((s) => s.service));
-    const missing = Object.keys(localCatalog)
-      .filter((n) => !present.has(n))
-      .map((n) => ({ service: n, container: n, state: "absent", status: "not started" }));
-    return [...(self.bundle || []), ...missing];
-  }, [self.bundle, localCatalog]);
-
-  async function toggleLocal(svc: string, running: boolean) {
-    setErr(null);
-    setBusy(svc);
-    try {
-      await (running ? api.stopLocal(svc) : api.startLocal(svc));
-    } catch (e) {
-      setErr(`${svc}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    setBusy(null);
-    void refreshSelf();
-  }
-
-  const localActions = (s: ServiceStatus) => {
-    const svc = localCatalog[s.service];
-    if (!svc) return null;
-    const op = localOps[s.service];
-    const opBusy = op && (op.state === "starting" || op.state === "stopping");
-    const running = isUp(s);
-    return (
-      <button
-        className={`link-btn ${running ? "stop" : ""}`}
-        disabled={busy === s.service || !!opBusy}
-        onClick={() => toggleLocal(s.service, running)}
-        title={op?.error || ""}
-      >
-        {opBusy ? op.phase || op.state : running ? "Stop" : "Start"}
-      </button>
-    );
-  };
 
   return (
     <div className="panel wide">
@@ -584,10 +734,7 @@ function ControlPage({
           <>
             <dt>Workspace</dt>
             <dd>
-              <a href="#workspaces">
-                <code>{self.workspace.name}</code>
-              </a>{" "}
-              <span className="muted">({self.workspace.source})</span>
+              <code>{self.workspace.name}</code> <span className="muted">({self.workspace.source})</span>
             </dd>
           </>
         )}
@@ -597,6 +744,9 @@ function ControlPage({
           {self.dockerOK ? <span className="muted">(docker {self.docker})</span> : <span className="error-text">unreachable: {self.dockerError}</span>}
         </dd>
       </dl>
+
+      {self.workspace && wsInfo?.own?.pending && <WorkspacePending name={wsInfo.own.name} />}
+      {self.workspace && wsInfo?.own && !wsInfo.own.pending && <OwnWorkspacePanel ws={wsInfo.own} />}
 
       {(self.requests || []).length > 0 && (
         <>
@@ -610,16 +760,14 @@ function ControlPage({
       )}
 
       <h3>Services</h3>
+      <p className="muted">Start/stop is on the Services list in the sidebar; logs for each container are here.</p>
       {self.bundleError && <div className="banner error">{self.bundleError}</div>}
-      {err && <div className="banner error">{err}</div>}
-      <ServicesTable services={bundleRows} logsFor={logsFor} actions={localActions} />
+      <ServicesTable services={self.bundle || []} logsFor={logsFor} />
 
       <h3>Workspace gateways</h3>
       {gwErr && <div className="banner error">{gwErr}</div>}
       {gateways.length === 0 ? (
-        <p className="muted">
-          None. <a href="#workspaces">Start one from Workspaces →</a>
-        </p>
+        <p className="muted">None. Start one from the Workspaces list in the sidebar.</p>
       ) : (
         <div className="svc-table">
           {gateways.map((g) => {
@@ -628,7 +776,7 @@ function ControlPage({
               <div key={g.name} className="svc-row">
                 <div className="svc-head">
                   <span className={`dot ${g.state === "running" && h.degraded ? "degraded" : g.state}`} />
-                  <a href={`#gw/${g.name}/info`}>
+                  <a href={g.workspace ? `#ws/${g.workspace}/settings` : `#gw/${g.name}/info`}>
                     <code>{g.workspace || `gw/${g.name}`}</code>
                   </a>
                   <span className={`svc-status ${g.state === "error" || h.degraded ? "error-text" : "muted"}`}>
@@ -787,19 +935,15 @@ function ServiceDown({ svc }: { svc: ComputedService & { status: ServiceStatus }
 }
 
 function GatewayDetails({ name, gw, gwErr }: { name: string; gw: Gateway | null | undefined; gwErr: string | null }) {
-  const busy = gw?.state === "starting" || gw?.state === "stopping";
-  const loadSpawn = useCallback(() => api.log(name), [name]);
-  const logsFor = useCallback((svc: string) => () => api.childServiceLogs(name, svc), [name]);
-
   if (!gw) {
     return (
       <div className="panel">
         <h2>gw/{name}</h2>
         <p className="muted">{gwErr ? `Can't list gateways: ${gwErr}` : "This gateway doesn't exist (any more)."}</p>
-        <a href="#workspaces">Workspaces →</a>
       </div>
     );
   }
+  const busy = gw.state === "starting" || gw.state === "stopping";
   return (
     <div className="panel wide">
       <h2>
@@ -824,7 +968,7 @@ function GatewayDetails({ name, gw, gwErr }: { name: string; gw: Gateway | null 
         <dt>Workspace</dt>
         <dd>
           {gw.workspace ? (
-            <a href="#workspaces">
+            <a href={`#ws/${gw.workspace}/settings`}>
               <code>{gw.workspace}</code>
             </a>
           ) : (
@@ -855,11 +999,7 @@ function GatewayDetails({ name, gw, gwErr }: { name: string; gw: Gateway | null 
         )}
       </dl>
 
-      <h3>Containers</h3>
-      <ServicesTable services={gw.services || []} logsFor={logsFor} />
-
-      <h3>Start / stop log</h3>
-      <LogView load={loadSpawn} live={!!busy} empty="Nothing logged." />
+      <GatewayLivePanel name={name} gw={gw} />
     </div>
   );
 }

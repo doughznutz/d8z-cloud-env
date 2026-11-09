@@ -1,0 +1,24 @@
+# Continue CLI (cn) tool policy for carol's report runs: the generated docs,
+# read only as plain text from carol's doc server with curl - nothing else.
+# Installed as the carol-agent user's ~/.continue/permissions.yaml (see
+# dev/carol/Dockerfile).
+
+# The one thing allowed: curl against carol's doc server.
+allow:
+  - Bash(curl -s 'http://carol:8503/*)
+  - Bash(curl -s "http://carol:8503/*)
+  - Bash(curl -s http://carol:8503/*)
+
+# Nothing prompts: headless runs (-p) can't answer a prompt anyway, so
+# anything not allowed above is effectively denied.
+ask: []
+
+# Tools the model never sees: no file access, no changes, no web.
+exclude:
+  - Read
+  - List
+  - Search
+  - Write
+  - Edit
+  - MultiEdit
+  - Fetch
