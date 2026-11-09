@@ -1,4 +1,8 @@
-"""Shared settings for the orchestrator and extractors.
+"""Per-instance wiring, from the environment compose / gw-server set.
+
+These differ between carols (each workspace's has its own base path and
+data volume), so they can't live in the shared settings file. Everything
+a person would tune instead lives in ~/.d8z/carol.yaml - see settings.py.
 
 CAROL_SOURCE_DIR is the workspace mounted read-only; CAROL_DATA_DIR is the
 volume generated docs are written to - they must never be the same path.
@@ -18,13 +22,13 @@ DATA_DIR: str = os.environ.get("CAROL_DATA_DIR", "/data")
 #: build iframe URLs for the per-language doc trees that actually resolve.
 BASE_PATH: str = os.environ.get("CAROL_BASE_PATH", "carol")
 
-#: Where the orchestrator persists run history, under the data volume so it
-#: survives a container restart/rebuild.
-STATE_FILE: str = os.path.join(DATA_DIR, ".carol", "runs.json")
+#: Carol's own state (doc-run history, report runs) - its own volume, kept
+#: apart from DATA_DIR because everything under DATA_DIR is served, and the
+#: report agents read what's served (not, say, other agents' past reports).
+STATE_DIR: str = os.environ.get("CAROL_STATE_DIR", "/state")
 
-#: Oldest runs beyond this count are dropped per language, so history.json
-#: doesn't grow without bound.
-MAX_HISTORY: int = 25
+#: Where the orchestrator persists run history.
+STATE_FILE: str = os.path.join(STATE_DIR, "runs.json")
 
 #: dood's embedded NATS server (dev/dood/server/nats.go) opens a plain
 #: client listener on internal_net alongside its leafnode port - this is
@@ -40,5 +44,24 @@ CHAT_SUBJECT: str = "chat.lobby"
 #: history survives a dashboard restart.
 CHAT_STREAM: str = "CHAT"
 
-#: Most chat messages to show at once.
-CHAT_HISTORY: int = 50
+#: Where each LLM report run (prompt + every agent's response) is persisted,
+#: one JSON file per run.
+REPORTS_DIR: str = os.path.join(STATE_DIR, "reports")
+
+#: JetStream stream capturing every "<prefix>.>" subject, so published
+#: reports can be read back after the fact.
+REPORT_STREAM: str = "REPORTS"
+
+#: The host's ~/.d8z/carol.yaml, bind mounted on its own (the rest of
+#: ~/.d8z holds secrets) - see settings.py.
+CONFIG_FILE: str = os.environ.get("CAROL_CONFIG_FILE", "/etc/d8z/carol.yaml")
+
+#: The carol-agents service (server/agent_runner.py), which runs the agent
+#: CLIs where they can see only the docs.
+AGENTS_URL: str = os.environ.get("CAROL_AGENTS_URL", "http://carol-agents:8519")
+
+#: The doc trees as the report agents reach them: carol's own Traefik, from
+#: carol-agents, over the network ("carol" resolves at the root gateway and
+#: inside every bundle). Agents read pages only as ``<url>?format=text``
+#: (server/docserver.py) - they have no file access to the docs at all.
+DOCS_URL: str = os.environ.get("CAROL_DOCS_URL", f"http://carol:8503/{BASE_PATH}/docs/")

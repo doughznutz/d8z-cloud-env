@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timezone
 from typing import cast
 
-from . import config
+from . import config, settings
 from .extractors import REGISTRY
 from .models import History, RunRecord
 
@@ -67,7 +67,7 @@ def _record(history: History, language: str, result: RunRecord) -> RunRecord:
     """
     hist = history.setdefault(language, [])
     hist.append(result)
-    del hist[: -config.MAX_HISTORY]
+    del hist[: -settings.load().docs_keep_runs]
     _save_history(config.STATE_FILE, history)
     return result
 
@@ -76,7 +76,7 @@ def run_language(language: str, history: History | None = None) -> RunRecord:
     """Runs one language's extractor and records the result.
 
     Args:
-        language: Key into `REGISTRY` ("go", "typescript", or "python").
+        language: Key into `REGISTRY` (e.g. "go", "python").
         history: History to update; loaded from disk if not given. Passing
             an existing history in lets callers batch several runs (see
             `run_all`) without reloading/re-saving the whole file each time.

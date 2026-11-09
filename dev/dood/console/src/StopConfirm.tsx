@@ -49,7 +49,7 @@ export function StopConfirm({ gw, onStop, onKeep, compact = false }: StopConfirm
       ].filter(Boolean)
     : [];
   const review = (
-    <a href={`${gw.path}#workspaces`} target="_blank" rel="noopener" title="Open the workspace's repository tools to push first">
+    <a href={`${gw.path}#control`} target="_blank" rel="noopener" title="Open the workspace's repository tools to push first">
       {compact ? "push first ↗" : "Open its Workspace tab to push first ↗"}
     </a>
   );

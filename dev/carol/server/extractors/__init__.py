@@ -10,7 +10,7 @@ tool actually works.
 from typing import Protocol
 
 from ..models import ExtractResult
-from . import golang, python, typescript
+from . import golang, python, shell, typescript
 
 
 class Extractor(Protocol):
@@ -36,4 +36,5 @@ REGISTRY: dict[str, Extractor] = {
     "go": golang,
     "typescript": typescript,
     "python": python,
+    "shell": shell,
 }

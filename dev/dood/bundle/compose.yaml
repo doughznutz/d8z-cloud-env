@@ -89,6 +89,17 @@ services:
     container_name: !reset null
     restart: unless-stopped
     profiles: !override [carol]
+    # Spelled out: extends doesn't carry depends_on over.
+    depends_on: [carol-agents]
+    networks: !override [internal_net, external_net]
+
+  # Carol's agent runner - see docker-compose.yaml. Reached as carol-agents
+  # on this bundle's own networks.
+  carol-agents:
+    extends: { file: ../../../docker-compose.yaml, service: carol-agents }
+    container_name: !reset null
+    restart: unless-stopped
+    profiles: !override [carol]
     networks: !override [internal_net, external_net]
 
   # The dind sidecar (stage 1 of a dind bundle). Its API is on tcp:2375
@@ -120,6 +131,7 @@ volumes:
   og-ollama-data:
   gopher-data:
   carol-docs:
+  carol-state:
   dind-data:
   # A manager child's own workspace.yaml (project-scoped: never the root's).
   # A workspace gateway doesn't get one - its override replaces the

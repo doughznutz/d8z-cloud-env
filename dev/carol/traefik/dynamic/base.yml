@@ -17,7 +17,7 @@ http:
     # be redirected before it reaches the static server.
     add-trailing-slash:
       redirectRegex:
-        regex: '^(https?://[^/]+/{{ $p }}/docs/(go|python|typescript))$'
+        regex: '^(https?://[^/]+/{{ $p }}/docs/(go|python|typescript|shell))$'
         replacement: "${1}/"
         permanent: true
     strip-go:
@@ -29,6 +29,9 @@ http:
     strip-typescript:
       stripPrefix:
         prefixes: ['/{{ $p }}/docs/typescript']
+    strip-shell:
+      stripPrefix:
+        prefixes: ['/{{ $p }}/docs/shell']
 
   routers:
     docs-go:
@@ -46,6 +49,11 @@ http:
       entryPoints: [web]
       middlewares: [add-trailing-slash, strip-typescript]
       service: docs-typescript
+    docs-shell:
+      rule: 'PathPrefix(`/{{ $p }}/docs/shell`)'
+      entryPoints: [web]
+      middlewares: [add-trailing-slash, strip-shell]
+      service: docs-shell
     # Catch-all: everything that isn't one of the doc trees above is the
     # Streamlit dashboard itself, which already expects the full,
     # unstripped path (its own --server.baseUrlPath is this same $p).
@@ -67,6 +75,10 @@ http:
       loadBalancer:
         servers:
           - url: "http://127.0.0.1:8516"
+    docs-shell:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8518"
     dashboard:
       loadBalancer:
         servers:

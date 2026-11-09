@@ -70,8 +70,8 @@ export function DeploymentPage({ catalog, runs, onRan }: DeploymentPageProps) {
       <h2>Deployment</h2>
       <p className="muted">
         What this gateway builds and ships (named images, one tag each in one Docker Hub repository) and where it runs
-        them (cloud gateways). Dangerous jobs (a push, a VM) ask you to confirm first. GitHub work lives in{" "}
-        <a href="#workspaces">Workspaces</a>.
+        them (cloud gateways). Dangerous jobs (a push, a VM) ask you to confirm first. GitHub work lives on{" "}
+        <a href="#control">Control</a>.
       </p>
       <dl className="facts">
         <dt>Config</dt>
