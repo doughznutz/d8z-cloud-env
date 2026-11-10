@@ -1,0 +1,5 @@
+# Doc problems that predate these checks (cmd/doclint): tolerated
+# until fixed, never added to. Regenerate after fixing some with:
+#   go run ./cmd/doclint -update
+orphan-comment emit.go: Emitting a structType as JSON Schema
+orphan-comment model.go: Deriving a type model from Go

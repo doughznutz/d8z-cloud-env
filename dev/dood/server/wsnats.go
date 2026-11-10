@@ -49,6 +49,9 @@ import (
 	"sync"
 	"time"
 
+	"d8z/gw/cfgtree"
+	"d8z/gw/jobs"
+
 	"github.com/nats-io/nats.go"
 )
 
@@ -152,7 +155,7 @@ type assignGift struct {
 	Assign *wsAssignment     `json:"assign,omitempty"` // the workspace it serves, if any
 	Files  map[string][]byte `json:"files"`            // the parent's config (cfgtree.go)
 	Env    map[string]string `json:"env,omitempty"`    // env vars that config names (token_env)
-	Branch []cfgOp           `json:"branch,omitempty"` // config changes it was started from
+	Branch []cfgtree.Op      `json:"branch,omitempty"` // config changes it was started from
 }
 
 // --- parent side --------------------------------------------------------------
@@ -250,7 +253,7 @@ func (m *Manager) notifyChildren() {
 }
 
 // ChildConfigDiff asks a child for its config changes.
-func (m *Manager) ChildConfigDiff(name string) ([]cfgOp, error) {
+func (m *Manager) ChildConfigDiff(name string) ([]cfgtree.Op, error) {
 	if m.nats == nil {
 		return nil, errors.New("nats not available")
 	}
@@ -269,7 +272,7 @@ func (m *Manager) ChildConfigDiff(name string) ([]cfgOp, error) {
 	if err != nil {
 		return nil, err
 	}
-	var ops []cfgOp
+	var ops []cfgtree.Op
 	return ops, json.Unmarshal(plain, &ops)
 }
 
@@ -455,7 +458,7 @@ func (m *Manager) workspaceStatus(ctx context.Context) wsStatus {
 		st.Config = []string{"can't diff config: " + err.Error()}
 	} else {
 		for _, o := range ops {
-			st.Config = append(st.Config, o.summary())
+			st.Config = append(st.Config, o.Summary())
 		}
 	}
 	if m.cfg.WorkspaceName == "" {
@@ -474,9 +477,9 @@ func (m *Manager) workspaceStatus(ctx context.Context) wsStatus {
 		st.Clean = !present // nothing to lose; files without git can't be judged
 		return st
 	}
-	g := gitCmd{ctx: ctx, log: nil, env: gitEnv(""), pre: []string{"-C", a.Dir}, editor: true}
-	// Not g.out: it trims, and a porcelain line's first column can be a space.
-	cmd := g.command([]string{"status", "--porcelain=v1", "--untracked-files=normal"})
+	g := jobs.GitCmd{Ctx: ctx, Log: nil, Env: jobs.GitEnv(""), Pre: []string{"-C", a.Dir}, Editor: true}
+	// Not g.Out: it trims, and a porcelain line's first column can be a space.
+	cmd := g.Command([]string{"status", "--porcelain=v1", "--untracked-files=normal"})
 	raw, err := cmd.Output()
 	out := strings.TrimRight(string(raw), "\n")
 	if err != nil {
@@ -496,7 +499,7 @@ func (m *Manager) workspaceStatus(ctx context.Context) wsStatus {
 			st.Files = append(st.Files, line)
 		}
 	}
-	if n, err := g.out("rev-list", "--count", "HEAD", "--not", "--remotes"); err == nil {
+	if n, err := g.Out("rev-list", "--count", "HEAD", "--not", "--remotes"); err == nil {
 		st.Unpushed, _ = strconv.Atoi(n)
 	}
 	st.Clean = st.Changed == 0 && st.Untracked == 0 && st.Unpushed == 0 && len(st.Config) == 0

@@ -90,7 +90,7 @@ func TestConfigBranchRebaseMerge(t *testing.T) {
 	}
 	got := []string{}
 	for _, o := range ops {
-		got = append(got, o.summary())
+		got = append(got, o.Summary())
 	}
 	if strings.Join(got, "; ") != "set workspace.yaml: workspaces.[alpha].branch; remove workspace.yaml: workspaces.[beta]" {
 		t.Fatalf("diff: %v", got)

@@ -227,7 +227,10 @@ const field = <T,>(setF: Dispatch<SetStateAction<T>>, k: keyof T) => (e: FieldEv
 // ---- Docker Hub: account, repository, token ----
 
 /** The Docker Hub repo-status check: in flight, present, or absent/errored. */
-type RepoCheckState = { checking: true } | HubRepoStatus | null;
+// The server's HubRepoStatus never carries an "error" field itself (a
+// failed request throws, api.ts's request() helper); { error } here is
+// this check's own client-side state for "the request itself failed".
+type RepoCheckState = { checking: true } | HubRepoStatus | { error: string } | null;
 
 function DockerHubSection({
   hub,

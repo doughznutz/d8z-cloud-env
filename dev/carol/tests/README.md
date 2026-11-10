@@ -9,9 +9,10 @@ that view are what they should be.
 |---|---|---|---|
 | `build/` | `docker build` (the `test` stage; a failure fails the build) | nothing | each CLI's *installed* config allows only `curl -s http://carol:8503/...`; the text view renders and links correctly; the extractors embed no source; the agent user can't read `/app` |
 | `system/` | the running `carol-agents` | a deployed stack | no mounts, only the LLM keys in its env, every doc page reachable as text with no broken links and no source |
+| `workspace/` | the running `carol`, against its real workspace | a deployed stack | every extractor generates docs from the actual workspace without failing (into a temp dir - published docs untouched) |
 | `live/` | the running `carol`, on demand | og running | a real agent (cn via og) reads the docs, and can't leak carol's code, workspace files, `/etc/passwd` or API keys |
 
-Run the post-deploy suites with `tests/run.sh [system|live|all]`.
+Run the post-deploy suites with `tests/run.sh [system|workspace|live|all]`.
 
 **Tests never call a paid model** (claude, gemini, codex) - those cost
 money. Their limits are checked without a model, by `build/` (their

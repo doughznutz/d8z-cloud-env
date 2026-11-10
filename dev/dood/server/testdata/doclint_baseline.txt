@@ -1,0 +1,39 @@
+# Doc problems that predate these checks (cmd/doclint): tolerated
+# until fixed, never added to. Regenerate after fixing some with:
+#   go run ./cmd/doclint -update
+missing-file-ref nats.go: nats_test.go
+orphan-comment cfgtree.go: Config passed down the tree, branch/merge
+orphan-comment docker.go: The docker CLI (and its compose
+orphan-comment jobs_manager.go: Manager implements the jobs package's own
+orphan-comment nats_leaf_test.go: NATS leaf auth, exercised through a
+orphan-comment requests.go: Requests up the tree. A child
+orphan-comment workspaces.go: Workspaces replace the old single PROJECT.
+orphan-comment wsnats.go: Workspace control plane over NATS, riding
+uncommented-sync gateways.go: countingReader.n
+uncommented-sync gateways.go: ringBuf.mu
+uncommented-sync workspaces.go: wsStore.mu
+undocumented-route main.go main: DELETE /api/branches/{id}
+undocumented-route main.go main: DELETE /api/gateways/{name}
+undocumented-route main.go main: GET /
+undocumented-route main.go main: GET /api/branches
+undocumented-route main.go main: GET /api/gateways
+undocumented-route main.go main: GET /api/gateways/{name}/log
+undocumented-route main.go main: GET /api/gateways/{name}/services/{svc}/logs
+undocumented-route main.go main: GET /api/gateways/{name}/workspace-status
+undocumented-route main.go main: GET /api/nats/inbox
+undocumented-route main.go main: GET /api/self
+undocumented-route main.go main: GET /api/services/{svc}/logs
+undocumented-route main.go main: POST /api/gateways
+undocumented-route main.go main: POST /api/gateways/{name}/nats/send
+undocumented-route main.go main: POST /api/nats/send
+undocumented-route main.go main: POST /api/services/{svc}/start
+undocumented-route main.go main: POST /api/services/{svc}/stop
+undocumented-route requests.go registerRequestRoutes: DELETE /api/requests/{name}
+undocumented-route requests.go registerRequestRoutes: GET /api/requests
+undocumented-route requests.go registerRequestRoutes: POST /api/parent/requests
+undocumented-route requests.go registerRequestRoutes: POST /api/requests/{name}/approve
+undocumented-route workspaces.go registerWorkspaceRoutes: DELETE /api/workspaces/{name}
+undocumented-route workspaces.go registerWorkspaceRoutes: GET /api/workspaces
+undocumented-route workspaces.go registerWorkspaceRoutes: POST /api/workspaces
+undocumented-route workspaces.go registerWorkspaceRoutes: POST /api/workspaces/{name}/gateway
+undocumented-route workspaces.go registerWorkspaceRoutes: PUT /api/workspaces/{name}

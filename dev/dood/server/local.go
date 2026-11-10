@@ -13,7 +13,8 @@ import (
 // LocalService is one of the root project's own long-running non-gateway
 // services: Deightz (profile workspace) and the optional tools started on
 // demand from the Control tab (og, gopher, carol, dozzle), each in its own
-// profile. The deploy tooling isn't here - it's one-shot jobs (jobs.go).
+// profile. The deploy tooling isn't here - it's one-shot jobs (the jobs
+// package).
 // Unlike a gateway, these live in our own compose project (selfProject) and
 // are plain start/stop, no nesting.
 type LocalService struct {
@@ -105,14 +106,14 @@ func (m *Manager) StartLocal(name, project string) error {
 			files = append(files, "-f", f)
 		}
 	}
-	o, err := m.projectOp("svc:"+name, "starting", "building / pulling images and starting "+name)
+	o, err := m.tracker.Start("svc:"+name, "starting", "building / pulling images and starting "+name)
 	if err != nil {
 		return err
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 		defer cancel()
-		m.finishProject("svc:"+name, o, m.runLocal(ctx, func(project string) error {
+		m.tracker.Finish("svc:"+name, o, m.runLocal(ctx, func(project string) error {
 			args := append(append([]string{"compose", "-p", project}, files...), "up", "-d", "--build", svc.Name)
 			return upWithRetryEnv(ctx, o.Log, "", projectEnv, args)
 		}))
@@ -159,14 +160,14 @@ func (m *Manager) StopLocal(name string) error {
 	if !ok {
 		return fmt.Errorf("unknown service %q", name)
 	}
-	o, err := m.projectOp("svc:"+name, "stopping", "stopping "+name)
+	o, err := m.tracker.Start("svc:"+name, "stopping", "stopping "+name)
 	if err != nil {
 		return err
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		m.finishProject("svc:"+name, o, m.runLocal(ctx, func(project string) error {
+		m.tracker.Finish("svc:"+name, o, m.runLocal(ctx, func(project string) error {
 			files, _ := m.localComposeFiles(svc)
 			args := append(append([]string{"compose", "-p", project}, files...), "stop", svc.Name)
 			return dockerStreamHost(ctx, o.Log, "", args...)
@@ -189,22 +190,5 @@ func (m *Manager) runLocal(ctx context.Context, fn func(project string) error) e
 // plain name (without the "svc:" op-map prefix), so /api/self can surface
 // "starting"/"stopping"/"error" before (or without) a container to show it.
 func (m *Manager) LocalOps() map[string]map[string]string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := map[string]map[string]string{}
-	for key, o := range m.projOps {
-		name, ok := strings.CutPrefix(key, "svc:")
-		if !ok {
-			continue
-		}
-		v := map[string]string{"state": o.State}
-		if o.Phase != "" {
-			v["phase"] = o.Phase
-		}
-		if o.Err != "" {
-			v["error"] = o.Err
-		}
-		out[name] = v
-	}
-	return out
+	return m.tracker.Snapshot("svc:")
 }

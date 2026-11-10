@@ -3,7 +3,31 @@
  * (dev/dood/server/) sends and accepts over `api.ts`. This file is the sole
  * owner of cross-file shapes; component-local prop types stay colocated in
  * their own files.
+ *
+ * The Jobs and Deployment/Config domains' wire shapes are generated from
+ * their own Go structs (server/jobs, server/deployment -
+ * server/cmd/schemagen) into ./types.gen.ts, and re-exported below under
+ * their existing console-side names - so this file stays the single place
+ * importers look, and a Go field rename or addition shows up here without
+ * hand-editing. Request DTOs with no clean 1:1 Go match (TargetInput: the
+ * Go CloudTarget the console submits isn't quite deployment.yaml's
+ * CloudTarget - see its own comment) stay hand-written.
  */
+export type {
+  JobSpec as Job,
+  JobArg,
+  DeploymentResponse as Deployment,
+  DockerHubView as DockerHub,
+  ImageView as DeploymentImage,
+  GCPView as GCP,
+  TargetView as DeploymentTargetEntry,
+  CloudTarget as DeploymentTarget,
+  CloudState as TargetState,
+  HubRepoInfo as HubRepoStatus,
+  HubInput as DockerHubInput,
+  GCPInput,
+  HubImage as ImageInput,
+} from "./types.gen";
 
 /** One compose service's live container state, as reported by the backend. */
 export interface ServiceStatus {
@@ -95,26 +119,6 @@ export interface Gateway {
   services?: ServiceStatus[];
 }
 
-/** One job catalog entry (`api.jobs()`), run via `api.runJob`. */
-export interface Job {
-  group: string;
-  name: string;
-  label?: string;
-  dangerous?: boolean;
-  /** True for jobs shown on the Workspaces page rather than the Jobs page. */
-  workspace?: boolean;
-  args?: JobArg[];
-}
-
-/** One argument a {@link Job} accepts, rendered as a form field. */
-export interface JobArg {
-  name: string;
-  label?: string;
-  required?: boolean;
-  default?: string;
-  choices?: string[];
-}
-
 /** `api.jobRuns()` value, keyed by `"<group>/<name>"`. */
 export interface JobRun {
   /** e.g. "starting" | "error" | "running" | ... */
@@ -193,79 +197,6 @@ export interface Branch {
   changes: string[];
 }
 
-/** `api.deployment()`'s result: deployment.yaml plus live target state. */
-export interface Deployment {
-  editable: boolean;
-  file: string;
-  fromFile: boolean;
-  error?: string;
-  dockerHub?: DockerHub;
-  /** Compose service names available to build/push to Docker Hub. */
-  dhServices?: string[];
-  gcp?: GCP;
-  targets?: DeploymentTargetEntry[];
-  publicIP?: string;
-}
-
-/** The Docker Hub account/repository section of a {@link Deployment}. */
-export interface DockerHub {
-  username: string;
-  repository: string;
-  tokenSet: boolean;
-  tokenStored: boolean;
-  tokenEnv?: string;
-  images: DeploymentImage[];
-}
-
-/** One image built from a compose service and pushed to Docker Hub. */
-export interface DeploymentImage {
-  name: string;
-  /** Full docker ref, display only. */
-  ref: string;
-  /** Compose service name that builds this image. */
-  service: string;
-}
-
-/** The GCP project/credentials section of a {@link Deployment}. */
-export interface GCP {
-  project?: string;
-  zone?: string;
-  keyEmail?: string;
-  /** Service account key filename, default "gcp-sa.json". */
-  credentials?: string;
-}
-
-/** A configured cloud target plus its last known live state. */
-export interface DeploymentTargetEntry {
-  target: DeploymentTarget;
-  state?: TargetState;
-  /** Display ref, like "image:tag", for whatever's running there. */
-  ref?: string;
-  leafConnected?: boolean;
-  url?: string;
-}
-
-/** One cloud deploy target's configuration (deployment.yaml). */
-export interface DeploymentTarget {
-  name: string;
-  profile: "root" | "workspace";
-  image: string;
-  machineType: string;
-  diskGB: number;
-  /** CIDRs allowed to reach the target. */
-  allowFrom: string[];
-  /** .env keys forwarded to the target on launch. */
-  forwardEnv: string[];
-}
-
-/** A cloud target's last known VM state, from GCP. */
-export interface TargetState {
-  /** GCP instance status, e.g. "RUNNING" | "TERMINATED" | ... */
-  status: string;
-  instance: string;
-  address?: string;
-}
-
 /** One message in a gateway's NATS inbox, shown by Messenger.tsx. */
 export interface InboxMessage {
   seq: number | string;
@@ -323,31 +254,12 @@ export interface StartWorkspaceGatewayOptions {
   branch?: string;
 }
 
-/** Request body for `api.editDockerHub`. */
-export interface DockerHubInput {
-  username: string;
-  repository: string;
-  tokenEnv: string;
-  token: string;
-  clearToken: boolean;
-}
-
-/** Request body for `api.addImage`/`api.editImage`. */
-export interface ImageInput {
-  name: string;
-  service: string;
-}
-
-/** Request body for `api.editGCP`. */
-export interface GCPInput {
-  project: string;
-  zone: string;
-  credentials: string;
-  keyJSON: string;
-  clearKey: boolean;
-}
-
-/** Request body for `api.addTarget`/`api.editTarget`. */
+/**
+ * Request body for `api.addTarget`/`api.editTarget`. Hand-written, not
+ * reused from the generated CloudTarget: the console never sets `provider`
+ * (the server fills it in, and rejects anything else), so this stays its
+ * own narrower shape.
+ */
 export interface TargetInput {
   name: string;
   profile: string;
@@ -357,9 +269,6 @@ export interface TargetInput {
   allowFrom: string[];
   forwardEnv: string[];
 }
-
-/** Docker Hub repository existence/visibility check result. */
-export type HubRepoStatus = { exists: boolean; private?: boolean; pulls?: number } | { error: string };
 
 /**
  * The repeated "nothing being edited / adding a new item / editing an

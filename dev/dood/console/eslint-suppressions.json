@@ -1,0 +1,7 @@
+{
+  "src/api.ts": {
+    "jsdoc/no-restricted-syntax": {
+      "count": 38
+    }
+  }
+}

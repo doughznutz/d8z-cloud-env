@@ -1,6 +1,8 @@
 # ==============================================================================
 # Stage 1: Build & Pre-cache Models
 # ==============================================================================
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3007
 FROM ollama/ollama:latest AS model-builder
 
 # Start Ollama temporarily to populate the layer with core coding/reasoning models.
@@ -12,6 +14,8 @@ RUN ollama serve & \
 # ==============================================================================
 # Stage 2: Final Unified Runtime
 # ==============================================================================
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3007
 FROM ollama/ollama:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,6 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3013
 RUN pip3 install --no-cache-dir --break-system-packages streamlit requests
 
 # Bring over the models pre-pulled in stage 1.

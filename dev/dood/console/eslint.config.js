@@ -15,6 +15,10 @@ const exportedDeclarationContexts = [
   "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > ArrowFunctionExpression",
 ];
 
+// The api object's methods (src/api.ts): object-literal properties, which
+// the generic contexts above don't reach.
+const apiMethod = "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > ObjectExpression > Property";
+
 export default tseslint.config(
   { ignores: ["dist/**"] },
   js.configs.recommended,
@@ -77,7 +81,30 @@ export default tseslint.config(
             ArrowFunctionExpression: false,
             FunctionExpression: false,
           },
-          contexts: [...exportedDeclarationContexts, "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > ObjectExpression > Property"],
+          contexts: [...exportedDeclarationContexts, apiMethod],
+        },
+      ],
+      // Each api method's JSDoc names the endpoint it calls - "@route GET
+      // /api/self", the same form as the Go server's mux patterns - so the
+      // client's docs say what it talks to, not just what it's for.
+      // Methods that predate this rule are baselined in
+      // eslint-suppressions.json (fails if a suppression goes unused).
+      // (no-restricted-syntax with :not(:has(...)) flags each method's block
+      // that lacks the tag; no-missing-syntax would only check that the tag
+      // appears somewhere in the file. Its context is matched against the
+      // node alone, without ancestors, so it's the bare "Property" - scoped
+      // to this file, where the only documented properties are the api's
+      // methods; undocumented ones, like a fetch's headers, aren't checked.)
+      "jsdoc/no-restricted-syntax": [
+        "error",
+        {
+          contexts: [
+            {
+              context: "Property",
+              comment: 'JsdocBlock:not(:has(JsdocTag[tag="route"]))',
+              message: "api methods need a @route tag: @route METHOD /api/path (as the Go server registers it)",
+            },
+          ],
         },
       ],
     },

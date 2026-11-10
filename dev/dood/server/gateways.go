@@ -19,6 +19,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"d8z/gw/cfgfile"
+	"d8z/gw/deployment"
+	"d8z/gw/jobs"
+	"d8z/gw/optracker"
 )
 
 // Gateway is one child bundle as the console sees it.
@@ -76,9 +81,8 @@ type op struct {
 type Manager struct {
 	cfg      Config
 	self     string                       // our container id (docker sets the hostname to it)
-	mu       sync.Mutex                   // guards ops, projOps, requests and every op's fields
+	mu       sync.Mutex                   // guards ops, requests and every op's fields
 	ops      map[string]*op               // spawn/stop ops, by child gateway name
-	projOps  map[string]*op               // same shape, keyed by project name - kept separate so a gateway and a project can share a name
 	recMu    sync.Mutex                   // serializes Reconcile
 	ready    sync.Map                     // name -> upstream it was last seen ready at
 	selfProj atomic.Value                 // our compose project name, once found (selfProject)
@@ -86,20 +90,38 @@ type Manager struct {
 	assign   atomic.Pointer[wsAssignment] // a workspace gateway's assignment, once its parent has sent it
 	nats     *NatsHub                     // nil if the embedded NATS server failed to start
 	requests map[string]*ParentRequest    // our children's, by name (requests.go); under mu
+	tracker  *optracker.Tracker           // jobs ("job:<id>") and local services ("svc:<name>"); its own mutex
+	deploy   *deployment.Store            // deployment.yaml
+	jobCat   *jobs.Catalog                // one-shot GitHub/Docker Hub/GCP actions
 }
 
 // NewManager builds the Manager and starts the embedded NATS hub. A NATS
 // failure is logged, not fatal: the gateway runs without it (m.nats nil).
 func NewManager(cfg Config) *Manager {
 	self, _ := os.Hostname()
-	m := &Manager{cfg: cfg, self: self, ops: map[string]*op{}, projOps: map[string]*op{}, ws: &wsStore{file: cfg.WorkspaceFile}}
+	m := &Manager{cfg: cfg, self: self, ops: map[string]*op{}, ws: &wsStore{file: cfg.WorkspaceFile}, tracker: optracker.New()}
 	hub, err := startNatsHub(cfg)
 	if err != nil {
 		log.Printf("nats: %v", err)
 	}
 	m.nats = hub
-	onConfigWrite = m.configChanged
+	var pinger deployment.NatsPinger // a nil *NatsHub would be a non-nil, panics-on-use interface
+	if hub != nil {
+		pinger = hub
+	}
+	m.deploy = deployment.NewStore(cfg.DeploymentFile, cfg.RootComposeFile, cfg.ProjectsRoot, pinger, m.childKey)
+	m.jobCat = jobs.NewCatalog(m, m.deploy, m.tracker)
+	cfgfile.OnWrite = m.configChanged
 	return m
+}
+
+// loadDeployment reads deployment.yaml (or nothing, if it's absent) and
+// fills in every default, so callers never see a blank field.
+func (m *Manager) loadDeployment() (*deployment.Deployment, bool, error) { return m.deploy.Load() }
+
+// RunJob validates against the job catalog and runs it in the background.
+func (m *Manager) RunJob(group, name, project string, args map[string]string) (string, error) {
+	return m.jobCat.RunJob(group, name, project, args)
 }
 
 // childID is child name's GW_ID: its bare name under the root, else our ID
@@ -449,13 +471,13 @@ func (m *Manager) spawn(ctx context.Context, req SpawnRequest, o *op) error {
 
 // upWithRetry runs a compose command (against host, "" = ours) and retries
 // once: fresh dind daemons occasionally fail BuildKit's registry lookups.
-func upWithRetry(ctx context.Context, w *ringBuf, host string, args []string) error {
+func upWithRetry(ctx context.Context, w io.Writer, host string, args []string) error {
 	return upWithRetryEnv(ctx, w, host, nil, args)
 }
 
 // upWithRetryEnv is upWithRetry with extra process-environment variables
 // (see dockerStreamHostEnv).
-func upWithRetryEnv(ctx context.Context, w *ringBuf, host string, extraEnv []string, args []string) error {
+func upWithRetryEnv(ctx context.Context, w io.Writer, host string, extraEnv []string, args []string) error {
 	err := dockerStreamHostEnv(ctx, w, host, extraEnv, args...)
 	if err != nil {
 		fmt.Fprintf(w, "\n%v - retrying once\n", err)
@@ -569,10 +591,10 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	}
 	// Same direction, same trigger as the HTTP routes above: once we're on a
 	// running child's gwlink, dial into its NATS leaf listener too. Cloud
-	// gateways we deployed (deployment.go) are dialled the same way, over
-	// the internet.
+	// gateways we deployed (the deployment package) are dialled the same
+	// way, over the internet.
 	if m.nats != nil {
-		for name, u := range m.cloudLeafURLs() {
+		for name, u := range m.deploy.LeafURLs() {
 			leafChildren["cloud:"+name] = u
 		}
 		m.nats.setRemotes(leafChildren)
@@ -992,7 +1014,7 @@ func (m *Manager) takeChildConfig(w io.Writer, name, mode string) string {
 		return ""
 	}
 	for _, o := range ops {
-		fmt.Fprintf(w, "config: %s\n", o.summary())
+		fmt.Fprintf(w, "config: %s\n", o.Summary())
 	}
 	if mode == "merge" {
 		if err := m.mergeConfig(ops); err != nil {

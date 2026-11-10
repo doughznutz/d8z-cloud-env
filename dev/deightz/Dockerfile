@@ -1,4 +1,6 @@
 # Streamlined IDE: linuxserver/code-server + our AI agent CLIs, no VNC desktop.
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3007
 FROM lscr.io/linuxserver/code-server:latest
 
 # Base dev tooling
@@ -16,17 +18,23 @@ RUN mkdir -p /usr/libexec/docker/cli-plugins && \
     chmod +x /usr/libexec/docker/cli-plugins/docker-compose
 
 # Node.js (LTS) + Vite
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL4006,DL3016
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get install -y nodejs && \
     npm install -g vite
 
 # Go
 ENV GO_VERSION=1.26.10
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL4001
 RUN wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -O /tmp/go.tgz && \
     tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # AI agent CLIs
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3016
 RUN npm install -g \
     @google/gemini-cli \
     @anthropic-ai/claude-code \
