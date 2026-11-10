@@ -1,5 +1,7 @@
-import type { ChangeEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { EntityCard, EntityRow, EntitySection, Panel } from "./design/entity";
+import { FormShell, RemoveButton, field, useSave } from "./design/form";
 import { JobRow } from "./JobRow";
 import { LogView } from "./LogView";
 import { api } from "./api";
@@ -66,163 +68,194 @@ export function DeploymentPage({ catalog, runs, onRan }: DeploymentPageProps) {
   const editable = !!dep?.editable;
 
   return (
-    <div className="panel wide">
-      <h2>Deployment</h2>
-      <p className="muted">
-        What this gateway builds and ships (named images, one tag each in one Docker Hub repository) and where it runs
-        them (cloud gateways). Dangerous jobs (a push, a VM) ask you to confirm first. GitHub work lives on{" "}
-        <a href="#control">Control</a>.
-      </p>
-      <dl className="facts">
-        <dt>Config</dt>
-        <dd>
-          <code>{dep?.file}</code>{" "}
-          <span className="muted">
-            {dep?.fromFile
-              ? "(can hold keys: kept outside every repository)"
-              : "(not written yet: showing defaults from .env; saved on your first change)"}
-          </span>
-        </dd>
-      </dl>
-      {(err || dep?.error) && <div className="banner error">{err || dep?.error}</div>}
-
-      {dep?.dockerHub && (
-        <>
-          <DockerHubSection hub={dep.dockerHub} editable={editable} onChanged={load} onRan={ran} />
-          <ImagesSection hub={dep.dockerHub} services={dep.dhServices || []} targets={dep.targets || []} editable={editable} onChanged={load} />
-        </>
-      )}
-      {dep?.gcp && <GCPSection gcp={dep.gcp} editable={editable} onChanged={load} />}
-      {dep && (
-        <TargetsSection
-          targets={dep.targets || []}
-          images={(dep.dockerHub?.images || []).map((i) => i.name)}
-          publicIP={dep.publicIP}
-          editable={editable}
-          onChanged={load}
-        />
-      )}
-
-      {Object.entries(groups).map(([group, items]) => (
-        <div key={group}>
-          <h3>{JOB_GROUPS[group] || group}</h3>
-          <div className="svc-table">
-            {items.map((j) => (
-              <JobRow key={`${j.group}/${j.name}`} job={j} run={runs[`${j.group}/${j.name}`]} onRan={ran} />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
+    <Panel wide>
+      <EntityCard
+        level="page"
+        title="Deployment"
+        description={
+          <>
+            What this gateway builds and ships (named images, one tag each in one Docker Hub repository) and where it runs
+            them (cloud gateways). Dangerous jobs (a push, a VM) ask you to confirm first. GitHub work lives on{" "}
+            <a href="#control">Control</a>.
+          </>
+        }
+        facts={[
+          {
+            label: "Config",
+            value: (
+              <>
+                <code>{dep?.file}</code>{" "}
+                <span className="muted">
+                  {dep?.fromFile
+                    ? "(can hold keys: kept outside every repository)"
+                    : "(not written yet: showing defaults from .env; saved on your first change)"}
+                </span>
+              </>
+            ),
+          },
+        ]}
+        error={err || dep?.error}
+      >
+        {dep?.dockerHub && (
+          <DockerHubSection hub={dep.dockerHub} editable={editable} onChanged={load} onRan={ran}>
+            <ImagesSection
+              hub={dep.dockerHub}
+              services={dep.dhServices || []}
+              targets={dep.targets || []}
+              editable={editable}
+              onChanged={load}
+              runs={runs}
+              onRan={ran}
+            />
+            <JobsSection
+              title={JOB_GROUPS.docker}
+              items={groups.docker}
+              runs={runs}
+              onRan={ran}
+              selector={{ argName: "image", label: "image", choices: ["all", ...dep.dockerHub.images.map((i) => i.name)] }}
+            />
+          </DockerHubSection>
+        )}
+        {dep?.gcp && (
+          <GCPSection gcp={dep.gcp} editable={editable} onChanged={load}>
+            <TargetsSection
+              targets={dep.targets || []}
+              images={(dep.dockerHub?.images || []).map((i) => i.name)}
+              publicIP={dep.publicIP}
+              editable={editable}
+              onChanged={load}
+              runs={runs}
+              onRan={ran}
+            />
+            <JobsSection
+              title={JOB_GROUPS.cloud}
+              items={groups.cloud}
+              runs={runs}
+              onRan={ran}
+              selector={{ argName: "target", label: "target", choices: (dep.targets || []).map((t) => t.target.name) }}
+            />
+          </GCPSection>
+        )}
+      </EntityCard>
+    </Panel>
   );
 }
 
-// ---- shared bits ----
-
-function SectionHead({ title, children }: { title: string; children?: ReactNode }) {
-  return (
-    <h3 className="dep-head">
-      {title}
-      <span className="dep-head-actions">{children}</span>
-    </h3>
-  );
+/** A single "image"/"target" selector shared by every job in a JobsSection, instead of one per row. */
+interface JobsSelector {
+  argName: string;
+  label: string;
+  choices: string[];
 }
 
-interface FormShellProps {
+// A group's jobs, nested inside the EntityCard they act on (Docker Hub's
+// account/repo jobs inside its card, GCP's VM jobs inside its own) rather
+// than listed generically: deployment.yaml only ever has these two job
+// groups, each owned by exactly one of the two cards. Collapsed by
+// default - the row-level macros on Images/Targets cover the common case,
+// and this is where you reach for anything else (pull, list, start/stop a
+// VM, ...). One selector up top stands in for the "image"/"target" input
+// every job here would otherwise repeat; a job that doesn't take that arg
+// (list_tags, cloud/list, ...) just ignores it.
+function JobsSection({
+  title,
+  items,
+  runs,
+  onRan,
+  selector,
+}: {
   title: string;
-  busy: boolean;
-  err: string | null;
-  onCancel: () => void;
-  onSubmit: () => void;
-  submitLabel?: string;
-  canSubmit?: boolean;
-  children?: ReactNode;
-}
-
-function FormShell({ title, busy, err, onCancel, onSubmit, submitLabel = "Save", canSubmit = true, children }: FormShellProps) {
+  items: Job[] | undefined;
+  runs: Record<string, JobRun>;
+  onRan: () => void;
+  selector: JobsSelector;
+}) {
+  const [sel, setSel] = useState(selector.choices[0] || "");
+  const [open, setOpen] = useState(false);
+  if (!items || items.length === 0) return null;
+  const fixedArgs = { [selector.argName]: sel };
   return (
-    <form
-      className="ws-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit();
-      }}
+    <EntitySection
+      title={title}
+      collapsed={!open}
+      action={
+        <>
+          <label className="muted">
+            {selector.label}{" "}
+            <select value={sel} onChange={(e) => setSel(e.target.value)} disabled={selector.choices.length === 0}>
+              {selector.choices.length === 0 && <option value="">none yet</option>}
+              {selector.choices.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="link-btn" onClick={() => setOpen((o) => !o)}>
+            {open ? "Hide" : "Show"}
+          </button>
+        </>
+      }
     >
-      <h3>{title}</h3>
-      {children}
-      {err && <div className="banner error">{err}</div>}
-      <div className="actions gap">
-        <button type="button" className="link-btn" onClick={onCancel}>
-          Cancel
-        </button>
-        <button className="primary" disabled={busy || !canSubmit}>
-          {busy ? "Saving…" : submitLabel}
-        </button>
-      </div>
-    </form>
+      {items.map((j) => (
+        <JobRow key={`${j.group}/${j.name}`} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} fixedArgs={fixedArgs} />
+      ))}
+    </EntitySection>
   );
 }
 
-// useSave runs a save call, tracking busy/error, then onDone.
-function useSave(onDone: () => void) {
-  const [busy, setBusy] = useState(false);
+// The same "confirm, run, show busy/log" idiom as JobRow, but for a job
+// whose one arg is fixed by the row it's attached to (an image's name, a
+// target's name) rather than picked by the user - so an image/target row
+// can act on itself directly instead of only through the generic Jobs
+// list above. Its run state is still the shared one keyed by "<group>/
+// <name>" (the backend allows one run of a given job at a time,
+// regardless of which image/target it was for), so this and the matching
+// row in the Jobs section always agree on whether it's busy.
+function useJobAction(label: string, group: string, name: string, argName: string, arg: string, run: JobRun | null | undefined, onRan: () => void) {
+  const id = `${group}/${name}`;
+  const [confirm, setConfirm] = useState(false);
+  const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
+  const busy = run?.state === "starting";
+
+  async function fire() {
+    setConfirm(false);
     setErr(null);
     try {
-      await fn();
-      onDone();
+      await api.runJob(group, name, "", { [argName]: arg });
+      setOpen(true);
+      onRan();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-    setBusy(false);
-  };
-  return { busy, err, run };
-}
+  }
 
-// RemoveButton confirms inline before calling fn.
-function RemoveButton({ fn, onDone, label = "Remove" }: { fn: () => Promise<unknown>; onDone: () => void; label?: string }) {
-  const [confirm, setConfirm] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  if (!confirm)
-    return (
-      <>
-        <button className="link-btn stop" onClick={() => setConfirm(true)}>
-          {label}
+  const control = (
+    <>
+      {confirm ? (
+        <span className="confirm-inline">
+          <button className="danger" onClick={fire}>
+            Really {label.toLowerCase()}
+          </button>
+          <button onClick={() => setConfirm(false)}>Cancel</button>
+        </span>
+      ) : (
+        <button className="link-btn" disabled={busy} onClick={() => setConfirm(true)}>
+          {busy ? run?.phase || run?.state : label}
         </button>
-        {err && <span className="error-text">{err}</span>}
-      </>
-    );
-  return (
-    <span className="confirm-inline">
-      <button
-        className="danger"
-        onClick={async () => {
-          setConfirm(false);
-          setErr(null);
-          try {
-            await fn();
-            onDone();
-          } catch (e) {
-            setErr(e instanceof Error ? e.message : String(e));
-          }
-        }}
-      >
-        Really {label.toLowerCase()}
-      </button>
-      <button onClick={() => setConfirm(false)}>Cancel</button>
-    </span>
+      )}
+      {run && (
+        <button className="link-btn" onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide log" : "Log"}
+        </button>
+      )}
+      {err && <span className="error-text">{err}</span>}
+    </>
   );
+  const log = open && run ? <LogView load={() => api.jobLog(id)} live={busy} empty="Nothing logged." /> : null;
+  return { control, log };
 }
-
-type FieldEvent = ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>;
-
-const field = <T,>(setF: Dispatch<SetStateAction<T>>, k: keyof T) => (e: FieldEvent) => {
-  const target = e.target;
-  const v = target instanceof HTMLInputElement && target.type === "checkbox" ? target.checked : target.value;
-  setF((x) => ({ ...x, [k]: v }));
-};
 
 // ---- Docker Hub: account, repository, token ----
 
@@ -237,11 +270,13 @@ function DockerHubSection({
   editable,
   onChanged,
   onRan,
+  children,
 }: {
   hub: DockerHub;
   editable: boolean;
   onChanged: () => void;
   onRan: () => void;
+  children?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [repo, setRepo] = useState<RepoCheckState>(null);
@@ -277,63 +312,70 @@ function DockerHubSection({
   }
 
   return (
-    <>
-      <SectionHead title="Docker Hub">
-        {editable && !editing && (
+    <EntityCard
+      title="Docker Hub"
+      actions={
+        editable &&
+        !editing && (
           <button className="link-btn" onClick={() => setEditing(true)}>
             Edit
           </button>
-        )}
-      </SectionHead>
-      <dl className="facts">
-        <dt>Repository</dt>
-        <dd>
-          <a href={`https://hub.docker.com/r/${key}/tags`} target="_blank" rel="noreferrer">
-            <code>{key}</code>
-          </a>{" "}
-          {repo && "checking" in repo && <span className="muted">checking…</span>}
-          {repo && "error" in repo && <span className="error-text">{repo.error}</span>}
-          {repo && "exists" in repo && repo.exists === true && (
-            <span className="muted">
-              exists · {repo.private ? "private" : "public"} · {repo.pulls} pulls
-            </span>
-          )}
-          {repo && "exists" in repo && repo.exists === false && <span className="warn-text">doesn't exist on Docker Hub yet</span>}{" "}
-          <button className="link-btn" onClick={check}>
-            Check
-          </button>
-          {editable && repo && "exists" in repo && repo.exists === false && !creating && (
+        )
+      }
+      facts={[
+        {
+          label: "Repository",
+          value: (
             <>
-              {" · "}
-              <button className="link-btn" onClick={() => setCreating(true)}>
-                Create repository…
+              <a href={`https://hub.docker.com/r/${key}/tags`} target="_blank" rel="noreferrer">
+                <code>{key}</code>
+              </a>{" "}
+              {repo && "checking" in repo && <span className="muted">checking…</span>}
+              {repo && "error" in repo && <span className="error-text">{repo.error}</span>}
+              {repo && "exists" in repo && repo.exists === true && (
+                <span className="muted">
+                  exists · {repo.private ? "private" : "public"} · {repo.pulls} pulls
+                </span>
+              )}
+              {repo && "exists" in repo && repo.exists === false && <span className="warn-text">doesn't exist on Docker Hub yet</span>}{" "}
+              <button className="link-btn" onClick={check}>
+                Check
               </button>
+              {editable && repo && "exists" in repo && repo.exists === false && !creating && (
+                <>
+                  {" · "}
+                  <button className="link-btn" onClick={() => setCreating(true)}>
+                    Create repository…
+                  </button>
+                </>
+              )}
+              {creating && (
+                <span className="confirm-inline">
+                  <select value={vis} onChange={(e) => setVis(e.target.value as "public" | "private")}>
+                    <option value="public">public</option>
+                    <option value="private">private</option>
+                  </select>
+                  <button className="danger" onClick={create}>
+                    Create {key}
+                  </button>
+                  <button onClick={() => setCreating(false)}>Cancel</button>
+                </span>
+              )}
             </>
-          )}
-          {creating && (
-            <span className="confirm-inline">
-              <select value={vis} onChange={(e) => setVis(e.target.value as "public" | "private")}>
-                <option value="public">public</option>
-                <option value="private">private</option>
-              </select>
-              <button className="danger" onClick={create}>
-                Create {key}
-              </button>
-              <button onClick={() => setCreating(false)}>Cancel</button>
-            </span>
-          )}
-        </dd>
-        <dt>Token</dt>
-        <dd>
-          {hub.tokenSet ? (
+          ),
+        },
+        {
+          label: "Token",
+          value: hub.tokenSet ? (
             <span>
               set <span className="muted">({hub.tokenStored ? "stored in deployment.yaml" : `from .env ${hub.tokenEnv}`})</span>
             </span>
           ) : (
             <span className="error-text">missing: pushes and repository changes will fail</span>
-          )}
-        </dd>
-      </dl>
+          ),
+        },
+      ]}
+    >
       {createErr && <div className="banner error">{createErr}</div>}
       {showLog && <LogView load={() => api.jobLog("docker/create_repo")} live empty="Starting…" />}
       {editing && (
@@ -346,7 +388,8 @@ function DockerHubSection({
           }}
         />
       )}
-    </>
+      {children}
+    </EntityCard>
   );
 }
 
@@ -412,48 +455,46 @@ function ImagesSection({
   targets,
   editable,
   onChanged,
+  runs,
+  onRan,
 }: {
   hub: DockerHub;
   services: string[];
   targets: DeploymentTargetEntry[];
   editable: boolean;
   onChanged: () => void;
+  runs: Record<string, JobRun>;
+  onRan: () => void;
 }) {
   const [editing, setEditing] = useState<EditingKey>(null);
   const im = editing && editing !== "new" ? hub.images.find((i) => i.name === editing) : null;
   const usedBy = (name: string) => targets.filter((t) => t.target.image === name).map((t) => t.target.name);
   return (
     <>
-      <SectionHead title="Images">
-        {editable && editing === null && (
-          <button className="link-btn" onClick={() => setEditing("new")}>
-            + Add image
-          </button>
-        )}
-      </SectionHead>
-      <div className="svc-table">
+      <EntitySection
+        title="Images"
+        action={
+          editable &&
+          editing === null && (
+            <button className="link-btn" onClick={() => setEditing("new")}>
+              + Add image
+            </button>
+          )
+        }
+      >
         {(hub.images || []).map((i) => (
-          <div key={i.name} className="svc-row">
-            <div className="svc-head">
-              <code>
-                <b>{i.name}</b>
-              </code>
-              <span className="svc-status muted">
-                <code>{i.ref}</code> ← built by compose service <code>{i.service}</code>
-                {usedBy(i.name).length > 0 && <> · runs on {usedBy(i.name).join(", ")}</>}
-              </span>
-              {editable && (
-                <>
-                  <button className="link-btn" onClick={() => setEditing(i.name)}>
-                    Edit
-                  </button>
-                  <RemoveButton fn={() => api.removeImage(i.name)} onDone={onChanged} />
-                </>
-              )}
-            </div>
-          </div>
+          <ImageRow
+            key={i.name}
+            image={i}
+            usedBy={usedBy(i.name)}
+            editable={editable}
+            onChanged={onChanged}
+            onEdit={() => setEditing(i.name)}
+            run={runs["docker/build_and_push"]}
+            onRan={onRan}
+          />
         ))}
-      </div>
+      </EntitySection>
       {editing !== null && (
         <ImageForm
           key={editing}
@@ -467,6 +508,55 @@ function ImagesSection({
         />
       )}
     </>
+  );
+}
+
+function ImageRow({
+  image,
+  usedBy,
+  editable,
+  onChanged,
+  onEdit,
+  run,
+  onRan,
+}: {
+  image: DeploymentImage;
+  usedBy: string[];
+  editable: boolean;
+  onChanged: () => void;
+  onEdit: () => void;
+  run: JobRun | null | undefined;
+  onRan: () => void;
+}) {
+  const build = useJobAction("Build & push", "docker", "build_and_push", "image", image.name, run, onRan);
+  return (
+    <EntityRow
+      id={
+        <code>
+          <b>{image.name}</b>
+        </code>
+      }
+      summary={
+        <>
+          <code>{image.ref}</code> ← built by compose service <code>{image.service}</code>
+          {usedBy.length > 0 && <> · runs on {usedBy.join(", ")}</>}
+        </>
+      }
+      actions={
+        <>
+          {build.control}
+          {editable && (
+            <>
+              <button className="link-btn" onClick={onEdit}>
+                Edit
+              </button>
+              <RemoveButton fn={() => api.removeImage(image.name)} onDone={onChanged} />
+            </>
+          )}
+        </>
+      }
+      expanded={build.log}
+    />
   );
 }
 
@@ -523,33 +613,34 @@ function ImageForm({
 
 // ---- GCP: project, zone, service-account key ----
 
-function GCPSection({ gcp, editable, onChanged }: { gcp: GCP; editable: boolean; onChanged: () => void }) {
+function GCPSection({ gcp, editable, onChanged, children }: { gcp: GCP; editable: boolean; onChanged: () => void; children?: ReactNode }) {
   const [editing, setEditing] = useState(false);
   return (
-    <>
-      <SectionHead title="Google Cloud">
-        {editable && !editing && (
+    <EntityCard
+      title="Google Cloud"
+      actions={
+        editable &&
+        !editing && (
           <button className="link-btn" onClick={() => setEditing(true)}>
             Edit
           </button>
-        )}
-      </SectionHead>
-      <dl className="facts">
-        <dt>Project</dt>
-        <dd>{gcp.project ? <code>{gcp.project}</code> : <span className="error-text">not set</span>}</dd>
-        <dt>Zone</dt>
-        <dd>{gcp.zone ? <code>{gcp.zone}</code> : <span className="error-text">not set</span>}</dd>
-        <dt>Service account</dt>
-        <dd>
-          {gcp.keyEmail ? (
+        )
+      }
+      facts={[
+        { label: "Project", value: gcp.project ? <code>{gcp.project}</code> : <span className="error-text">not set</span> },
+        { label: "Zone", value: gcp.zone ? <code>{gcp.zone}</code> : <span className="error-text">not set</span> },
+        {
+          label: "Service account",
+          value: gcp.keyEmail ? (
             <>
               <code>{gcp.keyEmail}</code> <span className="muted">(key {gcp.credentials})</span>
             </>
           ) : (
             <span className="error-text">no key - add a service-account key (Compute Admin) with Edit</span>
-          )}
-        </dd>
-      </dl>
+          ),
+        },
+      ]}
+    >
       {editing && (
         <GCPForm
           gcp={gcp}
@@ -560,7 +651,8 @@ function GCPSection({ gcp, editable, onChanged }: { gcp: GCP; editable: boolean;
           }}
         />
       )}
-    </>
+      {children}
+    </EntityCard>
   );
 }
 
@@ -662,33 +754,45 @@ function TargetsSection({
   publicIP,
   editable,
   onChanged,
+  runs,
+  onRan,
 }: {
   targets: DeploymentTargetEntry[];
   images: string[];
   publicIP?: string;
   editable: boolean;
   onChanged: () => void;
+  runs: Record<string, JobRun>;
+  onRan: () => void;
 }) {
   const [editing, setEditing] = useState<EditingKey>(null);
   const t = editing && editing !== "new" ? targets.find((x) => x.target.name === editing)?.target : null;
   return (
     <>
-      <SectionHead title="Cloud gateways">
-        {editable && editing === null && (
-          <button className="link-btn" onClick={() => setEditing("new")}>
-            + Add target
-          </button>
-        )}
-      </SectionHead>
-      {targets.length === 0 ? (
-        <p className="muted">No targets yet. A target is a VM running one profile from your Docker Hub images.</p>
-      ) : (
-        <div className="svc-table">
-          {targets.map((x) => (
-            <TargetRow key={x.target.name} t={x} editable={editable} onEdit={() => setEditing(x.target.name)} onChanged={onChanged} />
-          ))}
-        </div>
-      )}
+      <EntitySection
+        title="Cloud gateways"
+        action={
+          editable &&
+          editing === null && (
+            <button className="link-btn" onClick={() => setEditing("new")}>
+              + Add target
+            </button>
+          )
+        }
+        empty="No targets yet. A target is a VM running one profile from your Docker Hub images."
+      >
+        {targets.map((x) => (
+          <TargetRow
+            key={x.target.name}
+            t={x}
+            editable={editable}
+            onEdit={() => setEditing(x.target.name)}
+            onChanged={onChanged}
+            run={runs["cloud/deploy"]}
+            onRan={onRan}
+          />
+        ))}
+      </EntitySection>
       {editing !== null && (
         <TargetForm
           key={editing}
@@ -711,11 +815,15 @@ function TargetRow({
   editable,
   onEdit,
   onChanged,
+  run,
+  onRan,
 }: {
   t: DeploymentTargetEntry;
   editable: boolean;
   onEdit: () => void;
   onChanged: () => void;
+  run: JobRun | null | undefined;
+  onRan: () => void;
 }) {
   const { target, state } = t;
   const [text, setText] = useState("");
@@ -724,6 +832,7 @@ function TargetRow({
   const [err, setErr] = useState<string | null>(null);
   const running = state?.status === "RUNNING";
   const dot = !state ? null : running ? (t.leafConnected ? "running" : "degraded") : state.status === "TERMINATED" ? "exited" : "starting";
+  const deploy = useJobAction("Deploy", "cloud", "deploy", "target", target.name, run, onRan);
 
   async function send(e: FormEvent) {
     e.preventDefault();
@@ -742,62 +851,74 @@ function TargetRow({
   }
 
   return (
-    <div className="svc-row">
-      <div className="svc-head">
-        {dot && <span className={`dot ${dot}`} />}
+    <EntityRow
+      dot={dot}
+      id={
         <code>
           <b>{target.name}</b>
         </code>
-        <span className="tag">{target.profile}</span>
-        <span className="svc-status muted">
+      }
+      tag={target.profile}
+      summary={
+        <>
           <code>{t.ref}</code> · {target.machineType}, {target.diskGB} GB · from {(target.allowFrom || []).join(", ") || "nobody"}
-        </span>
-        {t.url && (
-          <a href={t.url} target="_blank" rel="noreferrer">
-            Open ↗
-          </a>
-        )}
-        {editable && (
-          <>
-            <button className="link-btn" onClick={onEdit}>
-              Edit
-            </button>
-            <RemoveButton fn={() => api.removeTarget(target.name)} onDone={onChanged} />
-          </>
-        )}
-      </div>
-      <div className="svc-head ws-gw muted">
-        {!state
-          ? "not deployed - run cloud / deploy below"
-          : `VM ${state.instance}: ${state.status}${state.address ? ` · ${state.address}` : ""}${
-              running ? (t.leafConnected ? " · NATS linked" : " · NATS not linked") : ""
-            }`}
-      </div>
-      {running && (
-        <form className="svc-head ws-gw" onSubmit={send}>
-          <span className="muted">NATS</span>
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={`message to ${target.name}'s inbox`}
-            size={40}
-            disabled={busy}
-          />
-          <button className="link-btn" disabled={busy || !text.trim()}>
-            {busy ? "sending…" : "Send"}
-          </button>
-          {res && (
-            <span>
-              <span className="ok-text">delivered</span> · reply <code>{res}</code>
-            </span>
+        </>
+      }
+      actions={
+        <>
+          {deploy.control}
+          {t.url && (
+            <a href={t.url} target="_blank" rel="noreferrer">
+              Open ↗
+            </a>
           )}
-        </form>
-      )}
-      {err && <div className="banner error">{err}</div>}
-      {(target.allowFrom || []).length === 0 && (
-        <div className="banner error">No allow_from: deploy will refuse until you list who may reach it (Edit).</div>
-      )}
-    </div>
+          {editable && (
+            <>
+              <button className="link-btn" onClick={onEdit}>
+                Edit
+              </button>
+              <RemoveButton fn={() => api.removeTarget(target.name)} onDone={onChanged} />
+            </>
+          )}
+        </>
+      }
+      detail={
+        <>
+          <div className="svc-head ws-gw muted">
+            {!state
+              ? "not deployed - click Deploy to create its VM"
+              : `VM ${state.instance}: ${state.status}${state.address ? ` · ${state.address}` : ""}${
+                  running ? (t.leafConnected ? " · NATS linked" : " · NATS not linked") : ""
+                }`}
+          </div>
+          {running && (
+            <form className="svc-head ws-gw" onSubmit={send}>
+              <span className="muted">NATS</span>
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={`message to ${target.name}'s inbox`}
+                size={40}
+                disabled={busy}
+              />
+              <button className="link-btn" disabled={busy || !text.trim()}>
+                {busy ? "sending…" : "Send"}
+              </button>
+              {res && (
+                <span>
+                  <span className="ok-text">delivered</span> · reply <code>{res}</code>
+                </span>
+              )}
+            </form>
+          )}
+          {err && <div className="banner error">{err}</div>}
+          {(target.allowFrom || []).length === 0 && (
+            <div className="banner error">No allow_from: deploy will refuse until you list who may reach it (Edit).</div>
+          )}
+        </>
+      }
+      expanded={deploy.log}
+    />
   );
 }
 

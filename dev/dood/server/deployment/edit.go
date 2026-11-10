@@ -102,6 +102,50 @@ func trimAll(ss []string) []string {
 	return out
 }
 
+// ---- named-list CRUD shared by images and targets ----
+
+// upsertNamed returns a copy of list with item added (oldName == "") or
+// replacing the entry named oldName, refusing a name already used by a
+// different entry and erroring if oldName isn't found. kind names the
+// entries in error messages ("image", "target").
+func upsertNamed[T any](list []T, name func(T) string, oldName string, item T, kind string) ([]T, error) {
+	n := name(item)
+	for _, o := range list {
+		if name(o) == n && name(o) != oldName {
+			return nil, fmt.Errorf("%s %q already exists", kind, n)
+		}
+	}
+	if oldName == "" {
+		return append(list, item), nil
+	}
+	for i, o := range list {
+		if name(o) == oldName {
+			out := append([]T{}, list...)
+			out[i] = item
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s %q", kind, oldName)
+}
+
+// removeNamed returns a copy of list with the entry named target dropped,
+// or an error if none matched.
+func removeNamed[T any](list []T, name func(T) string, target string, kind string) ([]T, error) {
+	out := make([]T, 0, len(list))
+	found := false
+	for _, o := range list {
+		if name(o) == target {
+			found = true
+			continue
+		}
+		out = append(out, o)
+	}
+	if !found {
+		return nil, fmt.Errorf("no %s %q", kind, target)
+	}
+	return out, nil
+}
+
 // EditDockerHub saves the docker_hub account settings. The stored token is
 // replaced only by a non-empty new one, or cleared on request.
 func (s *Store) EditDockerHub(in HubInput) error {
@@ -129,29 +173,20 @@ func (s *Store) PutImage(oldName string, im HubImage) error {
 		if len(d.DockerHub.Images) == 0 {
 			d.DockerHub.Images = append([]HubImage{}, defaultHubImages...)
 		}
-		list := d.DockerHub.Images
-		for _, o := range list {
-			if o.Name == im.Name && o.Name != oldName {
-				return fmt.Errorf("image %q already exists", im.Name)
-			}
+		out, err := upsertNamed(d.DockerHub.Images, func(i HubImage) string { return i.Name }, oldName, im, "image")
+		if err != nil {
+			return err
 		}
-		if oldName == "" {
-			d.DockerHub.Images = append(list, im)
-			return nil
-		}
-		for i, o := range list {
-			if o.Name == oldName {
-				list[i] = im
-				// A renamed tag: targets running it follow.
-				for k := range d.Targets {
-					if d.Targets[k].Image == oldName {
-						d.Targets[k].Image = im.Name
-					}
+		d.DockerHub.Images = out
+		if oldName != "" && im.Name != oldName {
+			// A renamed tag: targets running it follow.
+			for k := range d.Targets {
+				if d.Targets[k].Image == oldName {
+					d.Targets[k].Image = im.Name
 				}
-				return nil
 			}
 		}
-		return fmt.Errorf("no image %q", oldName)
+		return nil
 	})
 }
 
@@ -167,17 +202,9 @@ func (s *Store) RemoveImage(name string) error {
 				return fmt.Errorf("target %q runs %q: change or remove it first", t.Name, name)
 			}
 		}
-		out := []HubImage{}
-		found := false
-		for _, o := range d.DockerHub.Images {
-			if o.Name == name {
-				found = true
-				continue
-			}
-			out = append(out, o)
-		}
-		if !found {
-			return fmt.Errorf("no image %q", name)
+		out, err := removeNamed(d.DockerHub.Images, func(i HubImage) string { return i.Name }, name, "image")
+		if err != nil {
+			return err
 		}
 		if len(out) == 0 {
 			return fmt.Errorf("keep at least one image")
@@ -251,29 +278,18 @@ func (s *Store) PutTarget(oldName string, t CloudTarget) error {
 	t.AllowFrom = trimAll(t.AllowFrom)
 	t.ForwardEnv = trimAll(t.ForwardEnv)
 	t.Provider = "" // gcp, the only one: keep the file minimal
+	if oldName != "" && t.Name != oldName {
+		if st, ok := s.LoadState()[oldName]; ok && st.Instance != "" {
+			return fmt.Errorf("%s has a VM (%s): delete it (cloud/delete) before renaming the target", oldName, st.Instance)
+		}
+	}
 	return s.Update(func(d *Deployment) error {
-		for _, o := range d.Targets {
-			if o.Name == t.Name && o.Name != oldName {
-				return fmt.Errorf("target %q already exists", t.Name)
-			}
+		out, err := upsertNamed(d.Targets, func(t CloudTarget) string { return t.Name }, oldName, t, "target")
+		if err != nil {
+			return err
 		}
-		if oldName == "" {
-			d.Targets = append(d.Targets, t)
-			return nil
-		}
-		for i, o := range d.Targets {
-			if o.Name != oldName {
-				continue
-			}
-			if t.Name != oldName {
-				if st, ok := s.LoadState()[oldName]; ok && st.Instance != "" {
-					return fmt.Errorf("%s has a VM (%s): delete it (cloud/delete) before renaming the target", oldName, st.Instance)
-				}
-			}
-			d.Targets[i] = t
-			return nil
-		}
-		return fmt.Errorf("no target %q", oldName)
+		d.Targets = out
+		return nil
 	})
 }
 
@@ -283,14 +299,9 @@ func (s *Store) RemoveTarget(name string) error {
 		return fmt.Errorf("%s still has a VM (%s, %s): run cloud/delete first", name, st.Instance, st.Status)
 	}
 	return s.Update(func(d *Deployment) error {
-		out := []CloudTarget{}
-		for _, o := range d.Targets {
-			if o.Name != name {
-				out = append(out, o)
-			}
-		}
-		if len(out) == len(d.Targets) {
-			return fmt.Errorf("no target %q", name)
+		out, err := removeNamed(d.Targets, func(t CloudTarget) string { return t.Name }, name, "target")
+		if err != nil {
+			return err
 		}
 		d.Targets = out
 		return nil

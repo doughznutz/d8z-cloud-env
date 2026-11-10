@@ -3,20 +3,15 @@ package jobs
 import (
 	"encoding/json"
 	"net/http"
+
+	"d8z/gw/internal/httpjson"
 )
 
 // writeJSON sends v as an uncached JSON response with the given status code.
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
-}
+var writeJSON = httpjson.Write
 
 // writeErr sends err as a JSON {"error": ...} body with the given status code.
-func writeErr(w http.ResponseWriter, code int, err error) {
-	writeJSON(w, code, map[string]string{"error": err.Error()})
-}
+var writeErr = httpjson.Err
 
 // JobsResponse is api.jobs()'s result: the catalog, with defaults and
 // choices filled in, and the .env's own default project.

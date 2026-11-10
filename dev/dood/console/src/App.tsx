@@ -11,11 +11,11 @@ import {
 import { StopConfirm } from "./StopConfirm";
 import { DeploymentPage } from "./Deployment";
 import { api } from "./api";
+import { EntityCard, EntityRow, EntitySection, Panel } from "./design/entity";
+import type { Fact } from "./design/entity";
 import { Messenger, ParentAndSiblings } from "./Messenger";
-import { JobRow } from "./JobRow";
 import { isUp, health } from "./health";
 import { LogView } from "./LogView";
-import { ServicesTable } from "./ServicesTable";
 import { GatewayLivePanel } from "./GatewayLivePanel";
 import { RowMenu } from "./RowMenu";
 import type { Gateway, Job, JobRun, Request, Route, Self, ServiceStatus, WorkspaceInfo } from "./types";
@@ -713,113 +713,70 @@ function ControlPage({
   runs: Record<string, JobRun>;
   onRan: () => void;
 }) {
-  const logsFor = useCallback((svc: string) => () => api.serviceLogs(svc), []);
-
   const wsJobs = useMemo(() => (catalog || []).filter((j) => j.workspace), [catalog]);
   const first = ["pull", "diff_repo", "push_branch", "create_pull_request"];
   const mainJobs = first.map((n) => wsJobs.find((j) => j.name === n)).filter((j): j is Job => !!j);
   const moreJobs = wsJobs.filter((j) => !first.includes(j.name));
 
-  return (
-    <div className="panel wide">
-      <h2>
-        Control <code>{self.id}</code> <small className="muted">{self.role}</small>
-      </h2>
-      <dl className="facts">
-        <dt>Mounted at</dt>
-        <dd>
-          <code>{self.prefix || ""}/</code>
-        </dd>
-        {self.workspace && (
-          <>
-            <dt>Workspace</dt>
-            <dd>
-              <code>{self.workspace.name}</code> <span className="muted">({self.workspace.source})</span>
-            </dd>
-          </>
-        )}
-        <dt>Runs on</dt>
-        <dd>
-          {self.isolated ? "its own dind sidecar (isolated bundle)" : "a shared docker daemon"}{" "}
-          {self.dockerOK ? <span className="muted">(docker {self.docker})</span> : <span className="error-text">unreachable: {self.dockerError}</span>}
-        </dd>
-      </dl>
-
-      {self.workspace && wsInfo?.own?.pending && <WorkspacePending name={wsInfo.own.name} />}
-      {self.workspace && wsInfo?.own && !wsInfo.own.pending && <OwnWorkspacePanel ws={wsInfo.own} />}
-
-      {(self.requests || []).length > 0 && (
+  const facts: Fact[] = [{ label: "Mounted at", value: <code>{self.prefix || ""}/</code> }];
+  if (self.workspace) {
+    facts.push({
+      label: "Workspace",
+      value: (
         <>
-          <h3>Requests from children</h3>
-          <div className="svc-table">
+          <code>{self.workspace.name}</code> <span className="muted">({self.workspace.source})</span>
+        </>
+      ),
+    });
+  }
+  facts.push({
+    label: "Runs on",
+    value: (
+      <>
+        {self.isolated ? "its own dind sidecar (isolated bundle)" : "a shared docker daemon"}{" "}
+        {self.dockerOK ? <span className="muted">(docker {self.docker})</span> : <span className="error-text">unreachable: {self.dockerError}</span>}
+      </>
+    ),
+  });
+
+  return (
+    <Panel wide>
+      <EntityCard
+        level="page"
+        title={
+          <>
+            Control <code>{self.id}</code>
+          </>
+        }
+        tag={self.role}
+        facts={facts}
+        error={self.bundleError || gwErr}
+      >
+        {self.workspace && wsInfo?.own?.pending && <WorkspacePending name={wsInfo.own.name} />}
+        {self.workspace && wsInfo?.own && !wsInfo.own.pending && (
+          <OwnWorkspacePanel ws={wsInfo.own} mainJobs={mainJobs} moreJobs={moreJobs} runs={runs} onRan={onRan} />
+        )}
+
+        {(self.requests || []).length > 0 && (
+          <EntitySection title="Requests from children">
             {(self.requests ?? []).map((r) => (
               <RequestRow key={r.gateway} req={r} gw={gateways.find((g) => g.name === r.gateway)} onDone={refreshSelf} />
             ))}
-          </div>
-        </>
-      )}
+          </EntitySection>
+        )}
 
-      <h3>Services</h3>
-      <p className="muted">Start/stop is on the Services list in the sidebar; logs for each container are here.</p>
-      {self.bundleError && <div className="banner error">{self.bundleError}</div>}
-      <ServicesTable services={self.bundle || []} logsFor={logsFor} />
-
-      <h3>Workspace gateways</h3>
-      {gwErr && <div className="banner error">{gwErr}</div>}
-      {gateways.length === 0 ? (
-        <p className="muted">None. Start one from the Workspaces list in the sidebar.</p>
-      ) : (
-        <div className="svc-table">
-          {gateways.map((g) => {
-            const h = health(g.services);
-            return (
-              <div key={g.name} className="svc-row">
-                <div className="svc-head">
-                  <span className={`dot ${g.state === "running" && h.degraded ? "degraded" : g.state}`} />
-                  <a href={g.workspace ? `#ws/${g.workspace}/settings` : `#gw/${g.name}/info`}>
-                    <code>{g.workspace || `gw/${g.name}`}</code>
-                  </a>
-                  <span className={`svc-status ${g.state === "error" || h.degraded ? "error-text" : "muted"}`}>
-                    {g.phase || g.error || `${g.state} · ${h.up}/${h.total} up`}
-                  </span>
-                  <span className="muted">{g.docker}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {self.workspace && wsJobs.length > 0 && (
-        <>
-          <h3>GitHub</h3>
-          <div className="svc-table">
-            {mainJobs.map((j) => (
-              <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
+        <EntityCard title="Messages">
+          {self.role !== "root" && <AskParent />}
+          <Messenger base={self.prefix ?? ""} title="This gateway" />
+          <ParentAndSiblings prefix={self.prefix ?? ""} />
+          {gateways
+            .filter((g) => g.state === "running")
+            .map((g) => (
+              <Messenger key={g.name} base={g.prefix} title={`Child: ${g.workspace ? `${g.workspace} (gw/${g.name})` : `gw/${g.name}`}`} />
             ))}
-          </div>
-          {moreJobs.length > 0 && (
-            <>
-              <h3>More</h3>
-              <div className="svc-table">
-                {moreJobs.map((j) => (
-                  <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {self.role !== "root" && <AskParent />}
-
-      <h3>Messages</h3>
-      <Messenger base={self.prefix ?? ""} title="This gateway" />
-      <ParentAndSiblings prefix={self.prefix ?? ""} />
-      {gateways
-        .filter((g) => g.state === "running")
-        .map((g) => <Messenger key={g.name} base={g.prefix} title={`Child: ${g.workspace ? `${g.workspace} (gw/${g.name})` : `gw/${g.name}`}`} />)}
-    </div>
+        </EntityCard>
+      </EntityCard>
+    </Panel>
   );
 }
 
@@ -841,17 +798,22 @@ function RequestRow({ req, gw, onDone }: { req: Request; gw: Gateway | undefined
     onDone();
   };
   return (
-    <div className="svc-row">
-      <div className="svc-head">
-        <span className="dot degraded" />
+    <EntityRow
+      dot="degraded"
+      id={
         <a href={`#gw/${req.gateway}/info`}>
           <code>{gw?.workspace ? `${gw.workspace} (gw/${req.gateway})` : `gw/${req.gateway}`}</code>
         </a>
-        <span className="tag">{req.kind}</span>
-        <span className="svc-status">
+      }
+      tag={req.kind}
+      summary={
+        <>
           {req.reason || <span className="muted">no reason given</span>} <span className="muted">· {new Date(req.time).toLocaleTimeString()}</span>
-        </span>
-        {confirm ? (
+        </>
+      }
+      summaryTone="none"
+      actions={
+        confirm ? (
           <span className="confirm-inline">
             <button className="danger" disabled={busy} onClick={act(() => api.approveRequest(req.gateway))}>
               Restart gw/{req.gateway} now
@@ -867,16 +829,20 @@ function RequestRow({ req, gw, onDone }: { req: Request; gw: Gateway | undefined
               Dismiss
             </button>
           </>
-        )}
-      </div>
-      {confirm && (
-        <p className="muted ws-stop">
-          Stops its bundle (and any gateways below it) and starts it again from the same spec, on the current images.
-          Workspace files are kept.
-        </p>
-      )}
-      {err && <div className="banner error">{err}</div>}
-    </div>
+        )
+      }
+      detail={
+        <>
+          {confirm && (
+            <p className="muted ws-stop">
+              Stops its bundle (and any gateways below it) and starts it again from the same spec, on the current images.
+              Workspace files are kept.
+            </p>
+          )}
+          {err && <div className="banner error">{err}</div>}
+        </>
+      }
+    />
   );
 }
 
