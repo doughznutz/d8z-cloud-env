@@ -1,14 +1,18 @@
-"""Which programming languages the workspace uses, and how much carol documents.
+"""What carol documents of the workspace - and, as importantly, what it doesn't.
 
 Every extractor finds its own targets by a project marker (go.mod,
 tsconfig.json, __init__.py...), so a file outside any marker - or a
 language with no extractor at all - would otherwise be skipped silently.
-This scans every source file by extension and reports, per language, how
-many files sit inside something an extractor actually documents, so gaps
-show up on the dashboard instead.
+`scan` reports, per programming language, how many source files sit inside
+something an extractor actually documents; `uninspected` lists every other
+file in the workspace that no extractor reads (compose files, Dockerfiles,
+dependency manifests, Go tests, config...), grouped by kind, so whatever
+the docs - and the report agents reading them - can't see shows up on the
+dashboard instead.
 """
 
 import os
+import re
 from typing import TypedDict
 
 from .extractors import golang, shell, typescript
@@ -75,13 +79,44 @@ SKIP_DIRS = {
 
 
 class LanguageCoverage(TypedDict):
-    """One language's source files, and how many of them get documented."""
+    """One language's source files, and how many of them get documented.
+
+    `reasons` groups the uncovered files by why they're not documented.
+    """
 
     language: str
     extractor: str | None
     files: int
     covered: int
     uncovered: list[str]
+    reasons: dict[str, list[str]]
+
+
+class FileGroup(TypedDict):
+    """Workspace files of one kind that no extractor reads."""
+
+    kind: str
+    files: list[str]
+
+
+#: Kinds of file `uninspected` groups by, in display order: (kind, test on
+#: the file's workspace-relative path). The first match wins; anything left
+#: over is "Other".
+_KINDS: list[tuple[str, "re.Pattern[str]"]] = [
+    ("Compose files", re.compile(r"(^|/)(docker-)?compose[^/]*\.ya?ml$")),
+    ("Dockerfiles", re.compile(r"(^|/)Dockerfile[^/]*$|\.dockerfile$")),
+    (
+        "Dependency manifests",
+        re.compile(
+            r"(^|/)(go\.mod|go\.sum|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml"
+            r"|pyproject\.toml|requirements[^/]*\.txt|Pipfile(\.lock)?)$"
+        ),
+    ),
+    ("Go tests", re.compile(r"_test\.go$")),
+    ("Other YAML (Traefik, config, CI)", re.compile(r"\.ya?ml$")),
+    ("Markdown", re.compile(r"\.md$")),
+    ("Other config", re.compile(r"\.(toml|json|conf|ini|cfg)$|(^|/)\.[^/]+$")),
+]
 
 
 def _under_any(path: str, roots: list[str]) -> bool:
@@ -106,20 +141,35 @@ def scan(source_dir: str) -> list[LanguageCoverage]:
     Returns:
         One entry per language found, most files first.
     """
+    return _scan(source_dir)[0]
+
+
+def _scan(source_dir: str) -> tuple[list[LanguageCoverage], set[str]]:
+    """Does `scan`'s work, also returning which files it found documented.
+
+    Args:
+        source_dir: Root of the workspace.
+
+    Returns:
+        (scan's result, absolute paths of every documented source file).
+    """
     go_roots = golang.find_modules(source_dir)
     ts_roots = typescript.find_projects(source_dir)
     shell_scripts = set(shell.find_scripts(source_dir))
 
-    def covered(language: str, path: str) -> bool:
+    def why_not(language: str, path: str) -> str | None:
+        """Says why a source file isn't documented, or None if it is."""
         if language == "python":
-            return True  # packages via pdoc, everything else as scripts
+            return None  # packages via pdoc, everything else as scripts
         if language == "go":
-            return _under_any(path, go_roots)
+            if path.endswith("_test.go"):
+                return "test files - go doc doesn't document them"
+            return None if _under_any(path, go_roots) else "outside any Go module (no go.mod)"
         if language in ("typescript", "javascript"):
-            return _under_any(path, ts_roots)
+            return None if _under_any(path, ts_roots) else "outside any tsconfig.json project"
         if language == "shell":
-            return path in shell_scripts
-        return False
+            return None
+        return "no extractor for this language"
 
     files: dict[str, list[str]] = {}
     for root, dirs, names in os.walk(source_dir):
@@ -133,15 +183,58 @@ def scan(source_dir: str) -> list[LanguageCoverage]:
                 files.setdefault(language, []).append(path)
 
     out: list[LanguageCoverage] = []
+    documented: set[str] = set()
     for language, paths in files.items():
-        missed = [os.path.relpath(p, source_dir) for p in paths if not covered(language, p)]
+        reasons: dict[str, list[str]] = {}
+        for p in paths:
+            reason = why_not(language, p)
+            if reason:
+                reasons.setdefault(reason, []).append(os.path.relpath(p, source_dir))
+            else:
+                documented.add(p)
+        missed = sorted(f for fs in reasons.values() for f in fs)
         out.append(
             {
                 "language": language,
                 "extractor": EXTRACTOR_FOR.get(language),
                 "files": len(paths),
                 "covered": len(paths) - len(missed),
-                "uncovered": sorted(missed),
+                "uncovered": missed,
+                "reasons": {r: sorted(fs) for r, fs in reasons.items()},
             }
         )
-    return sorted(out, key=lambda c: -c["files"])
+    return sorted(out, key=lambda c: -c["files"]), documented
+
+
+def uninspected(source_dir: str) -> list[FileGroup]:
+    """Lists every workspace file no extractor reads, grouped by kind.
+
+    That's every file except the source files `scan` counts as documented:
+    undocumented source (e.g. Go tests, a language with no extractor) plus
+    everything that isn't source at all - compose files, Dockerfiles,
+    manifests, config, docs. None of it reaches the generated docs, so
+    neither a reader of them nor a report agent can see it.
+
+    Args:
+        source_dir: Root of the workspace.
+
+    Returns:
+        One group per kind present, in _KINDS order with "Other" last;
+        files sorted within each.
+    """
+    documented = _scan(source_dir)[1]
+    groups: dict[str, list[str]] = {}
+    for root, dirs, names in os.walk(source_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in names:
+            path = os.path.join(root, name)
+            if path in documented:
+                continue
+            rel = os.path.relpath(path, source_dir)
+            kind = next((k for k, pattern in _KINDS if pattern.search(rel)), None)
+            if kind is None:
+                language = EXTENSIONS.get(os.path.splitext(name)[1].lower())
+                kind = "Source not documented" if language else "Other"
+            groups.setdefault(kind, []).append(rel)
+    order = [k for k, _ in _KINDS] + ["Source not documented", "Other"]
+    return [{"kind": k, "files": sorted(groups[k])} for k in order if k in groups]

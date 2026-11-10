@@ -9,3 +9,7 @@ __pycache__/
 
 # gw-server binary from a local `go build`
 dev/dood/server/gw
+
+# JSON Schema generated from gw-server's Go structs (go generate ./...);
+# console/src/types.gen.ts is gitignored in console/.gitignore
+dev/dood/server/schema/

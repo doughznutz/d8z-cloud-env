@@ -31,6 +31,9 @@ import (
 	"sync"
 	"syscall"
 
+	"d8z/gw/cfgfile"
+	"d8z/gw/jobs"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -91,13 +94,20 @@ type wsAssignment struct {
 	Mount wsMount `json:"mount"`           // the same mount, for its Deightz
 }
 
-// Validation patterns for a workspace's name, its owner/name repo, and
-// environment variable names (token_env and the like).
+// Validation patterns for a workspace's name, its owner/name repo,
+// environment variable names (token_env and the like), and a branch name
+// (the same pattern the jobs package's own branchRE uses).
 var (
 	wsNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	wsRepoRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$`)
 	wsEnvRE  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+	branchRE = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
 )
+
+// defaultProject is the .env's PROJECT - what "this repo" means on the
+// host (the same idea as the jobs and deployment packages' own
+// defaultProject, each kept to their own file since it's a one-liner).
+func defaultProject() string { return strings.TrimSpace(os.Getenv("PROJECT")) }
 
 // wsStore is workspace.yaml. It's re-read on every access (it's tiny), so a
 // hand edit on the host shows up without a restart.
@@ -193,49 +203,8 @@ func (s *wsStore) save(list []Workspace) error {
 		return err
 	}
 	content := append([]byte(wsFileHeader+"\n"), buf.Bytes()...)
-	return writeConfigFile(s.file, content)
+	return cfgfile.WriteFile(s.file, content)
 }
-
-// writeConfigFile writes a config file (workspace.yaml, deployment.yaml, a
-// key) atomically with mode 0600, keeping an existing file's owner - or else
-// its directory's - so a file on the host stays editable by its user.
-func writeConfigFile(file string, content []byte) error {
-	dir := filepath.Dir(file)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	uid, gid := -1, -1
-	if st, err := os.Stat(file); err == nil {
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-			uid, gid = int(sys.Uid), int(sys.Gid)
-		}
-	} else if st, err := os.Stat(dir); err == nil {
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-			uid, gid = int(sys.Uid), int(sys.Gid)
-		}
-	}
-	tmp := file + ".tmp"
-	if err := os.WriteFile(tmp, content, 0o600); err != nil {
-		return err
-	}
-	os.Chown(tmp, uid, gid)
-	if err := os.Rename(tmp, file); err != nil {
-		// The file itself is bind-mounted (not its directory): can't
-		// replace it, so rewrite it in place.
-		os.Remove(tmp)
-		if err := os.WriteFile(file, content, 0o600); err != nil {
-			return err
-		}
-	}
-	if onConfigWrite != nil {
-		onConfigWrite()
-	}
-	return nil
-}
-
-// onConfigWrite runs after every config file write: our children rebase
-// onto the new config (Manager.configChanged).
-var onConfigWrite func()
 
 // update loads the workspaces, applies fn and saves the result, under the
 // store's lock.
@@ -263,8 +232,8 @@ func (m *Manager) validateWorkspace(w *Workspace) error {
 	w.Branch = strings.TrimSpace(w.Branch)
 	w.TokenEnv = strings.TrimSpace(w.TokenEnv)
 	w.Gateway = strings.TrimSpace(w.Gateway)
-	if r, err := parseGHRepo(w.Repo); w.Repo != "" && err == nil && strings.Contains(w.Repo, "github.com") {
-		w.Repo = r.String() // accept a pasted clone URL
+	if r, err := jobs.ParseGHRepo(w.Repo); w.Repo != "" && err == nil && strings.Contains(w.Repo, "github.com") {
+		w.Repo = r // accept a pasted clone URL
 	}
 	if !wsNameRE.MatchString(w.Name) {
 		return fmt.Errorf("name must match %s", wsNameRE)

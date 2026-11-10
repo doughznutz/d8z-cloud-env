@@ -1,0 +1,3 @@
+# Doc problems that predate these checks (cmd/doclint): tolerated
+# until fixed, never added to. Regenerate after fixing some with:
+#   go run ./cmd/doclint -update

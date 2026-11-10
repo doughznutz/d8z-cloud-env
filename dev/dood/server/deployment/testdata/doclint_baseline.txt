@@ -1,0 +1,16 @@
+# Doc problems that predate these checks (cmd/doclint): tolerated
+# until fixed, never added to. Regenerate after fixing some with:
+#   go run ./cmd/doclint -update
+orphan-comment edit.go: Editing deployment.yaml from the console (Deployment
+orphan-comment hub.go: Docker Hub account/session handling: deployment.yaml's docker_hub
+undocumented-route deployment.go RegisterRoutes: GET /api/deployment
+undocumented-route deployment.go RegisterRoutes: POST /api/deployment/targets/{name}/message
+undocumented-route edit.go RegisterEditRoutes: DELETE /api/deployment/images/{name}
+undocumented-route edit.go RegisterEditRoutes: DELETE /api/deployment/targets/{name}
+undocumented-route edit.go RegisterEditRoutes: GET /api/deployment/docker-hub/repo
+undocumented-route edit.go RegisterEditRoutes: POST /api/deployment/images
+undocumented-route edit.go RegisterEditRoutes: POST /api/deployment/targets
+undocumented-route edit.go RegisterEditRoutes: PUT /api/deployment/docker-hub
+undocumented-route edit.go RegisterEditRoutes: PUT /api/deployment/gcp
+undocumented-route edit.go RegisterEditRoutes: PUT /api/deployment/images/{name}
+undocumented-route edit.go RegisterEditRoutes: PUT /api/deployment/targets/{name}

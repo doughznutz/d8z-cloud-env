@@ -21,7 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # nats-py: the client for dood's embedded NATS server (server/bus.py).
 # pyyaml: ~/.d8z/carol.yaml, carol's settings file (server/settings.py).
 # pytest: tests/ - build-time here, and post-deploy via tests/run.sh.
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir streamlit pdoc nats-py pyyaml pytest
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3016
 RUN npm install -g typedoc typescript
 
 # Go needs a writable cache/module path; keep it out of the read-only
@@ -38,6 +42,8 @@ ENV GOCACHE=/tmp/go-cache \
 # ==============================================================================
 FROM base AS lint
 
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir ruff black mypy types-PyYAML
 
 WORKDIR /app
@@ -65,6 +71,8 @@ FROM base AS runtime
 # never runs them. They only ever run in the carol-agents container (same
 # image, see docker-compose.yaml), whose API keys arrive at runtime, never
 # baked in.
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3016
 RUN npm install -g \
     @anthropic-ai/claude-code \
     @google/gemini-cli \
@@ -113,7 +121,8 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 # network. A failure here fails the whole `docker build`.
 # ==============================================================================
 FROM runtime AS test
-RUN cd /app && python3 -m pytest -q -p no:cacheprovider tests/build \
+WORKDIR /app
+RUN python3 -m pytest -q -p no:cacheprovider tests/build \
     && touch /tmp/build-tests.passed
 
 # ==============================================================================

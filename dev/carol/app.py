@@ -103,10 +103,24 @@ with docs_tab:
     )
     for c in langs:
         if c["uncovered"]:
-            why = "no extractor for this language" if not c["extractor"] else "outside any project"
             with st.expander(f"⚠️ {c['language']}: {len(c['uncovered'])} file(s) not documented"):
-                st.caption(why)
-                st.code("\n".join(c["uncovered"]))
+                for reason, files in c["reasons"].items():
+                    st.caption(reason)
+                    st.code("\n".join(files))
+
+    st.subheader("Files carol doesn't inspect")
+    st.caption(
+        "Everything in the workspace that no extractor reads, so it never reaches the "
+        "docs - and the report agents, who read only the docs, can't see it either."
+    )
+    groups = coverage.uninspected(config.SOURCE_DIR)
+    if not groups:
+        st.success("Every file in the workspace is inspected.")
+    else:
+        st.table([{"kind": g["kind"], "files": len(g["files"])} for g in groups])
+        for g in groups:
+            with st.expander(f"{g['kind']} ({len(g['files'])})"):
+                st.code("\n".join(g["files"]))
 
     st.divider()
     st.subheader("History")

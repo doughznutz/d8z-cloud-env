@@ -5,6 +5,8 @@
 # type hints. Nothing from this stage ships in the final image.
 FROM python:3.12-slim AS lint
 
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir ruff mypy types-requests nats-py
 
 WORKDIR /app
@@ -17,6 +19,8 @@ RUN ruff check . \
 # --- runtime image ---
 FROM python:3.12-slim
 
+# Baseline (predates hadolint here, see /.hadolint.yaml): pin when next touched.
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir streamlit requests docker nats-py
 
 WORKDIR /app

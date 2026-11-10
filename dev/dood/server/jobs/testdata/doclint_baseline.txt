@@ -1,0 +1,10 @@
+# Doc problems that predate these checks (cmd/doclint): tolerated
+# until fixed, never added to. Regenerate after fixing some with:
+#   go run ./cmd/doclint -update
+orphan-comment dockerhub.go: Native Docker Hub jobs: Hub API
+orphan-comment gcp.go: Native GCP: Compute Engine REST calls
+orphan-comment github.go: Native GitHub jobs: REST calls straight
+undocumented-route routes.go RegisterRoutes: GET /api/jobs
+undocumented-route routes.go RegisterRoutes: GET /api/jobs/log
+undocumented-route routes.go RegisterRoutes: GET /api/jobs/runs
+undocumented-route routes.go RegisterRoutes: POST /api/jobs/{group}/{name}

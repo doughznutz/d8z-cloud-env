@@ -16,6 +16,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"d8z/gw/deployment"
+	"d8z/gw/jobs"
 )
 
 // writeJSON sends v as an uncached JSON response with the given status code.
@@ -252,46 +255,13 @@ func main() {
 	})
 	// The Deployment tab: every gateway's own deployment.yaml (inherited
 	// from its parent - config.go).
-	registerDeploymentRoutes(mux, m)
-	registerDeploymentEditRoutes(mux, m)
+	deployment.RegisterRoutes(mux, m.deploy)
+	deployment.RegisterEditRoutes(mux, m.deploy)
 
 	// Jobs: one-shot actions against external systems (GitHub, Docker Hub,
 	// GCP - all native) - no running/stopped state, just fire, stream,
 	// done/error.
-	mux.HandleFunc("GET /api/jobs", func(w http.ResponseWriter, r *http.Request) {
-		catalog := m.JobCatalog()
-		writeJSON(w, http.StatusOK, map[string]any{"jobs": catalog, "defaultProject": defaultProject()})
-	})
-	mux.HandleFunc("GET /api/jobs/runs", func(w http.ResponseWriter, r *http.Request) {
-		runs := m.JobRuns()
-		writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
-	})
-	mux.HandleFunc("POST /api/jobs/{group}/{name}", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Project string            `json:"project"` // "" or "self": the .env's PROJECT
-			Args    map[string]string `json:"args"`
-		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil && err.Error() != "EOF" {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		id, err := m.RunJob(r.PathValue("group"), r.PathValue("name"), req.Project, req.Args)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, err)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": "starting"})
-	})
-	mux.HandleFunc("GET /api/jobs/log", func(w http.ResponseWriter, r *http.Request) {
-		s, ok := m.JobLog(r.URL.Query().Get("id"))
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write([]byte(s))
-	})
+	jobs.RegisterRoutes(mux, m.jobCat)
 
 	// The console: index.html is never cached (it names hashed assets).
 	files := http.FileServer(http.Dir(cfg.StaticDir))
