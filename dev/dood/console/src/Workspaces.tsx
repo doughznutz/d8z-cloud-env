@@ -1,11 +1,13 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { EntityCard, EntitySection } from "./design/entity";
 import { health } from "./health";
+import { JobRow } from "./JobRow";
 import { LogView } from "./LogView";
 import { StopConfirm } from "./StopConfirm";
 import { GatewayLivePanel } from "./GatewayLivePanel";
-import type { Branch, GatewaySelf, OwnWorkspace, Profile, Workspace } from "./types";
+import type { Branch, GatewaySelf, Job, JobRun, OwnWorkspace, Profile, Workspace } from "./types";
 
 /**
  * Workspaces are rendered as sidebar rows (see App.tsx's `Sidebar`), one per
@@ -20,8 +22,9 @@ import type { Branch, GatewaySelf, OwnWorkspace, Profile, Workspace } from "./ty
  *     workspace" / "Launch ad hoc gateway" forms, opened from the icons
  *     next to the sidebar's Workspaces heading.
  *   - {@link OwnWorkspacePanel} / {@link WorkspacePending}: a workspace
- *     gateway's own view of the workspace its parent assigned it (rendered
- *     on the Control tab, not here - these aren't something you start/stop).
+ *     gateway's own "GitHub" card - the workspace its parent assigned it,
+ *     plus the jobs that act on it - rendered on the Control tab, not here
+ *     (it isn't something you start/stop).
  */
 
 // A workspace as stored in workspace.yaml, with the new-workspace defaults
@@ -645,23 +648,37 @@ function BranchRow({ b, onLaunch, onDeleted }: { b: Branch; onLaunch: () => void
 }
 
 /** A workspace gateway's own view of its workspace: the repository tools. Rendered on the Control tab. */
-export function OwnWorkspacePanel({ ws }: { ws: OwnWorkspace }) {
+export function OwnWorkspacePanel({
+  ws,
+  mainJobs,
+  moreJobs,
+  runs,
+  onRan,
+}: {
+  ws: OwnWorkspace;
+  mainJobs: Job[];
+  moreJobs: Job[];
+  runs: Record<string, JobRun>;
+  onRan: () => void;
+}) {
+  const [showMore, setShowMore] = useState(false);
   return (
-    <div className="panel wide">
-      <h2>
-        Workspace <code>{ws.name}</code> <small className="muted">{ws.source}</small>
-      </h2>
-      <dl className="facts">
-        <dt>Repository</dt>
-        <dd>{ws.repo ? <code>{ws.repo}</code> : <span className="muted">none (local only)</span>}</dd>
-        <dt>Mounted at</dt>
-        <dd>
-          <code>{ws.dir}</code>{" "}
-          <span className={ws.writable ? "muted" : "error-text"}>{ws.writable ? "(read/write)" : "(read-only here)"}</span>
-        </dd>
-        <dt>Checkout</dt>
-        <dd>
-          {!ws.present ? (
+    <EntityCard
+      title="GitHub"
+      facts={[
+        { label: "Repository", value: ws.repo ? <code>{ws.repo}</code> : <span className="muted">none (local only)</span> },
+        {
+          label: "Mounted at",
+          value: (
+            <>
+              <code>{ws.dir}</code>{" "}
+              <span className={ws.writable ? "muted" : "error-text"}>{ws.writable ? "(read/write)" : "(read-only here)"}</span>
+            </>
+          ),
+        },
+        {
+          label: "Checkout",
+          value: !ws.present ? (
             <span className="warn-text">empty: Pull to clone {ws.repo || "it"}</span>
           ) : ws.git ? (
             <>
@@ -669,11 +686,14 @@ export function OwnWorkspacePanel({ ws }: { ws: OwnWorkspace }) {
             </>
           ) : (
             <span className="muted">files, not a git checkout (diff / push compare against the repo's default branch)</span>
-          )}
-        </dd>
-        <dt>Token</dt>
-        <dd>{ws.tokenSet ? "set" : <span className="warn-text">none: public pull only (set one on the parent's Workspaces tab)</span>}</dd>
-      </dl>
+          ),
+        },
+        {
+          label: "Token",
+          value: ws.tokenSet ? "set" : <span className="warn-text">none: public pull only (set one on the parent's Workspaces tab)</span>,
+        },
+      ]}
+    >
       <p className="muted">
         Push sends the workspace as it is now to a branch - a new <code>auto-update-…</code> one unless you name one -
         respecting <code>.gitignore</code> and always leaving out every <code>.env</code> and top-level dotfile.{" "}
@@ -681,8 +701,29 @@ export function OwnWorkspacePanel({ ws }: { ws: OwnWorkspace }) {
           ? "Its changes are committed here first, so the checkout stays in step with GitHub."
           : "It's pushed from a snapshot: your local directory and its git history are never written."}
       </p>
-      <p className="muted">Its GitHub jobs (pull, diff, push, pull requests) are below, on this same Control tab.</p>
-    </div>
+      {mainJobs.length > 0 && (
+        <EntitySection title="Jobs">
+          {mainJobs.map((j) => (
+            <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
+          ))}
+        </EntitySection>
+      )}
+      {moreJobs.length > 0 && (
+        <EntitySection
+          title="More"
+          collapsed={!showMore}
+          action={
+            <button className="link-btn" onClick={() => setShowMore((o) => !o)}>
+              {showMore ? "Hide" : "Show"}
+            </button>
+          }
+        >
+          {moreJobs.map((j) => (
+            <JobRow key={j.name} job={j} run={runs[`${j.group}/${j.name}`]} onRan={onRan} />
+          ))}
+        </EntitySection>
+      )}
+    </EntityCard>
   );
 }
 
@@ -693,10 +734,14 @@ export function OwnWorkspacePanel({ ws }: { ws: OwnWorkspace }) {
  */
 export function WorkspacePending({ name }: { name: string }) {
   return (
-    <div className="panel wide">
-      <h2>
-        Workspace <code>{name}</code> <small className="muted">awaiting assignment</small>
-      </h2>
+    <EntityCard
+      title={
+        <>
+          Workspace <code>{name}</code>
+        </>
+      }
+      tag="awaiting assignment"
+    >
       <p className="phase">
         <span className="spinner" /> Waiting for the parent gateway to send this workspace's details over NATS…
       </p>
@@ -705,6 +750,6 @@ export function WorkspacePending({ name }: { name: string }) {
         token only by its parent, sealed with a key that only the two of them hold. The parent links up within its next
         reconcile pass (every 15 seconds); a fresh workspace then pulls itself.
       </p>
-    </div>
+    </EntityCard>
   );
 }

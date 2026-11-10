@@ -18,21 +18,15 @@ import (
 	"time"
 
 	"d8z/gw/deployment"
+	"d8z/gw/internal/httpjson"
 	"d8z/gw/jobs"
 )
 
 // writeJSON sends v as an uncached JSON response with the given status code.
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
-}
+var writeJSON = httpjson.Write
 
 // writeErr sends err as a JSON {"error": ...} body with the given status code.
-func writeErr(w http.ResponseWriter, code int, err error) {
-	writeJSON(w, code, map[string]string{"error": err.Error()})
-}
+var writeErr = httpjson.Err
 
 // main loads the config, brings up the Manager (and its NATS hub), registers
 // every /api route plus the console's static files, starts the reconcile loop

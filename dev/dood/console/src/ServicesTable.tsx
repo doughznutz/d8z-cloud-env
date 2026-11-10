@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { EntityRow } from "./design/entity";
 import { isUp } from "./health";
 import { LogView } from "./LogView";
 import type { ServiceStatus } from "./types";
@@ -20,22 +21,31 @@ export function ServicesTable({ services, logsFor, actions }: ServicesTableProps
   if (!services || services.length === 0) return <p className="muted">No containers yet.</p>;
   return (
     <div className="svc-table">
-      {services.map((s) => (
-        <div key={s.container} className={`svc-row ${open === s.service ? "open" : ""}`}>
-          <div className="svc-head">
-            <span className={`dot ${s.state === "absent" ? "" : isUp(s) ? (s.status.includes("unhealthy") ? "degraded" : "running") : s.state}`} />
-            <code>{s.service}</code>
-            <span className={`svc-status ${isUp(s) ? "muted" : "error-text"}`}>{s.status}</span>
-            {actions && actions(s)}
-            {s.state !== "absent" && (
-              <button className="link-btn" onClick={() => setOpen(open === s.service ? null : s.service)}>
-                {open === s.service ? "Hide logs" : "Logs"}
-              </button>
-            )}
-          </div>
-          {open === s.service && <LogView load={logsFor(s.service)} live={isUp(s) || s.state === "restarting"} />}
-        </div>
-      ))}
+      {services.map((s) => {
+        const up = isUp(s);
+        const expanded = open === s.service;
+        return (
+          <EntityRow
+            key={s.container}
+            open={expanded}
+            dot={s.state === "absent" ? "" : up ? (s.status.includes("unhealthy") ? "degraded" : "running") : s.state}
+            id={<code>{s.service}</code>}
+            summary={s.status}
+            summaryTone={up ? "muted" : "error"}
+            actions={
+              <>
+                {actions && actions(s)}
+                {s.state !== "absent" && (
+                  <button className="link-btn" onClick={() => setOpen(expanded ? null : s.service)}>
+                    {expanded ? "Hide logs" : "Logs"}
+                  </button>
+                )}
+              </>
+            }
+            expanded={expanded && <LogView load={logsFor(s.service)} live={up || s.state === "restarting"} />}
+          />
+        );
+      })}
     </div>
   );
 }
