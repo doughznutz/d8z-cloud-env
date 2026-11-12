@@ -12,7 +12,7 @@
 # entry: its Traefik (host bundle) or its dind sidecar (dind bundle).
 #
 # Profiles pick the mix (dood always runs):
-#   deightz, og, gopher, carol, dozzle - no dependencies, but one dozzle per
+#   deightz, og, gopher, dozzle - no dependencies, but one dozzle per
 #   docker daemon: a dind bundle always gets one, a host bundle never does
 #   (it shares, and links to, the dozzle of the daemon it runs on)
 #
@@ -82,24 +82,17 @@ services:
     container_name: !reset null
     restart: unless-stopped
     profiles: !override [gopher]
-    networks: !override [internal_net, external_net]
-
-  carol:
-    extends: { file: ../../../docker-compose.yaml, service: carol }
-    container_name: !reset null
-    restart: unless-stopped
-    profiles: !override [carol]
     # Spelled out: extends doesn't carry depends_on over.
-    depends_on: [carol-agents]
+    depends_on: [gopher-agents]
     networks: !override [internal_net, external_net]
 
-  # Carol's agent runner - see docker-compose.yaml. Reached as carol-agents
+  # Gopher's agent runner - see docker-compose.yaml. Reached as gopher-agents
   # on this bundle's own networks.
-  carol-agents:
-    extends: { file: ../../../docker-compose.yaml, service: carol-agents }
+  gopher-agents:
+    extends: { file: ../../../docker-compose.yaml, service: gopher-agents }
     container_name: !reset null
     restart: unless-stopped
-    profiles: !override [carol]
+    profiles: !override [gopher]
     networks: !override [internal_net, external_net]
 
   # The dind sidecar (stage 1 of a dind bundle). Its API is on tcp:2375
@@ -130,8 +123,8 @@ networks:
 volumes:
   og-ollama-data:
   gopher-data:
-  carol-docs:
-  carol-state:
+  gopher-docs:
+  carol-state:   # migration only - see docker-compose.yaml's gopher
   dind-data:
   # A manager child's own workspace.yaml (project-scoped: never the root's).
   # A workspace gateway doesn't get one - its override replaces the

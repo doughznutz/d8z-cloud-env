@@ -211,7 +211,7 @@ func main() {
 	})
 
 	// Local services: start/stop containers in our own compose project
-	// (deightz and the optional og / gopher / carol / dozzle).
+	// (deightz and the optional og / gopher / dozzle).
 	mux.HandleFunc("POST /api/services/{svc}/start", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Project string `json:"project"`

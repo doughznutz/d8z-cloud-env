@@ -1,24 +1,43 @@
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# E/F/I: pycodestyle + pyflakes + import sorting.
-# D: pydocstyle - enforces that every module/class/function carries a
-#    docstring, so a later doc-extraction tool has something to read.
-select = ["E", "F", "I", "D"]
-# D203/D213 conflict with the D211/D212 pair the "google" convention below
-# already picks; D104 (missing docstring in __init__.py) doesn't apply here.
-ignore = ["D203", "D213", "D104"]
+# E/F: pyflakes/pycodestyle correctness. I: import sort. D: docstrings
+# present (this is what the Dockerfile's lint stage enforces "comments in
+# place" with). ANN: function signatures fully typed.
+select = ["E", "F", "I", "D", "ANN"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.mypy]
 python_version = "3.12"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 check_untyped_defs = true
+warn_return_any = true
 warn_unused_ignores = true
-warn_redundant_casts = true
-# streamlit, requests' runtime module, and docker ship without (or Gopher
-# doesn't install) type stubs - don't fail the build over third-party gaps.
+no_implicit_optional = true
+
+# Streamlit ships without type stubs (or a py.typed marker); nothing we can
+# do about that short of vendoring stubs, so it's the one import left
+# unchecked. "streamlit.*" (not just "streamlit") so submodule imports like
+# streamlit.components.v1 are covered too.
+[[tool.mypy.overrides]]
+module = "streamlit.*"
 ignore_missing_imports = true
+
+# Gopher's behaviour tests (tests/README.md). Run from /app inside the image.
+# Each suite needs a different environment, so none run unless named:
+# tests/build in `docker build`, tests/system in gopher-agents, tests/live in
+# gopher (see tests/run.sh).
+[tool.pytest.ini_options]
+addopts = "-ra"
+markers = [
+  "live: calls a real, local agent (cn via og) - never a paid one",
+]

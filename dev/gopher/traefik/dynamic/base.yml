@@ -1,0 +1,85 @@
+{{- /*
+  Gopher's own routes, in front of its own Streamlit landing page and the
+  per-language doc trees under /data. Rendered by Traefik's file provider
+  (Go templates + sprig), same trick dood's own dynamic/base.yml uses.
+
+  GOPHER_BASE_PATH is set by dood's gw-server (dev/dood/server/local.go) to
+  this service's full external mount point with no leading slash - "gopher"
+  at the root gateway, "gw/abc/gopher" nested under a spawned bundle - so it
+  must stay in sync with whatever entrypoint.sh passes Streamlit as
+  --server.baseUrlPath. "gopher" is just the default's own default.
+*/ -}}
+{{- $p := env "GOPHER_BASE_PATH" | default "gopher" }}
+http:
+  middlewares:
+    # The doc trees' own index pages use relative links against their own
+    # directory, so a request for the bare path (no trailing slash) has to
+    # be redirected before it reaches the static server.
+    add-trailing-slash:
+      redirectRegex:
+        regex: '^(https?://[^/]+/{{ $p }}/docs/(go|python|typescript|shell))$'
+        replacement: "${1}/"
+        permanent: true
+    strip-go:
+      stripPrefix:
+        prefixes: ['/{{ $p }}/docs/go']
+    strip-python:
+      stripPrefix:
+        prefixes: ['/{{ $p }}/docs/python']
+    strip-typescript:
+      stripPrefix:
+        prefixes: ['/{{ $p }}/docs/typescript']
+    strip-shell:
+      stripPrefix:
+        prefixes: ['/{{ $p }}/docs/shell']
+
+  routers:
+    docs-go:
+      rule: 'PathPrefix(`/{{ $p }}/docs/go`)'
+      entryPoints: [web]
+      middlewares: [add-trailing-slash, strip-go]
+      service: docs-go
+    docs-python:
+      rule: 'PathPrefix(`/{{ $p }}/docs/python`)'
+      entryPoints: [web]
+      middlewares: [add-trailing-slash, strip-python]
+      service: docs-python
+    docs-typescript:
+      rule: 'PathPrefix(`/{{ $p }}/docs/typescript`)'
+      entryPoints: [web]
+      middlewares: [add-trailing-slash, strip-typescript]
+      service: docs-typescript
+    docs-shell:
+      rule: 'PathPrefix(`/{{ $p }}/docs/shell`)'
+      entryPoints: [web]
+      middlewares: [add-trailing-slash, strip-shell]
+      service: docs-shell
+    # Catch-all: everything that isn't one of the doc trees above is the
+    # Streamlit dashboard itself, which already expects the full,
+    # unstripped path (its own --server.baseUrlPath is this same $p).
+    dashboard:
+      rule: 'PathPrefix(`/{{ $p }}`)'
+      entryPoints: [web]
+      service: dashboard
+
+  services:
+    docs-go:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8514"
+    docs-python:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8515"
+    docs-typescript:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8516"
+    docs-shell:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8518"
+    dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8517"

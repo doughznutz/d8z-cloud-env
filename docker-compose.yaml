@@ -19,12 +19,9 @@
 #
 #   Optional services (og, gopher, dozzle) are started on demand from the
 #   console's Control tab in either configuration - each has its own profile
-#   so gw-server can start exactly one. They still build from source (the
-#   dood image carries the repo in /self, so that works in the cloud too).
-#
-#   carol is also optional (profile `carol`) but, for now, is started by
-#   hand with `docker compose --profile carol up -d` - it isn't wired into
-#   the console's Control tab yet.
+#   so gw-server can start exactly one (gopher's profile brings up its
+#   gopher-agents with it). They still build from source (the dood image
+#   carries the repo in /self, so that works in the cloud too).
 #
 # The `dind` service is only an extends-template for a spawned gateway
 # bundle's sidecar (dev/dood/bundle/compose.yaml); nothing starts it here.
@@ -51,6 +48,16 @@ services:
     build:
       context: ./dev/deightz
 
+  # console-next - the TypeScript front door fronting dood's root gateway
+  # (multi-user auth, key store, direct NATS). Context is the repo root: it
+  # reuses gw-server's generated types.gen.ts the same way dood-dh does.
+  console-next-dh:
+    image: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:console-next
+    profiles: [dh]
+    build:
+      context: .
+      dockerfile: ./dev/dood/console-next/Dockerfile
+
   # ---------------------------------------------------------------------
   # Runtime: profiles root / workspace, from the Docker Hub images.
   # ---------------------------------------------------------------------
@@ -69,6 +76,13 @@ services:
     environment:
       - DOUGHZNUTZ_USER=${USER}
       - DOUGHZNUTZ_PASSWORD=${DOCKER_PASSWORD}
+      # Reachable from the console-next sibling container below (internal_net/
+      # external_net) instead of loopback-only - mirrors how the NATS plain
+      # client port is already unauthenticated-by-design on internal_net
+      # (server/nats.go). gw-server itself still has no auth of its own;
+      # console-next's own session/API-key auth is what actually gates it
+      # now that Traefik's basicAuth no longer fronts the console router.
+      - GW_LISTEN=0.0.0.0:8000
       - GW_ROLE=root
       # This gateway's NATS identity. "root" locally; a cloud deployment
       # sets its target name so the local root can address it.
@@ -104,6 +118,36 @@ services:
     networks:
       internal_net:
       external_net: {}   # internal_net alone is `internal: true` and silently drops the port publish
+
+  # console-next - the TypeScript front door: terminates auth (replacing
+  # Traefik's basicAuth on the console router - dynamic/base.yml), owns the
+  # user/session/API-key/credential store, and talks to gw-server (above)
+  # and its embedded NATS directly. Only fronts the root for now; a child
+  # bundle still serves gw-server directly, unchanged.
+  console-next:
+    image: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_REPO}:console-next
+    pull_policy: missing
+    profiles: [root, workspace]
+    container_name: console-next
+    depends_on: [dood]
+    environment:
+      - GW_TARGET=http://dood:8000
+      - CN_NATS_URL=dood:4222
+      - CN_LISTEN=0.0.0.0:8787
+      - CN_DB_FILE=/etc/d8z/console-next.db
+      - CN_MASTER_KEY_FILE=/etc/d8z/.console-next-master-key
+      # Seeds the first admin account from the same identity Traefik's
+      # basicAuth used to gate on - so the swap-over doesn't lock anyone
+      # out. A no-op once that account exists (src/auth/bootstrap.ts).
+      - CN_ADMIN_USER=${USER}
+      - CN_ADMIN_PASSWORD=${PASSWORD}
+    volumes:
+      # Same host dir as dood's /etc/d8z - console-next's db/master-key live
+      # alongside workspace.yaml/deployment.yaml, outside every checkout.
+      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}:/etc/d8z
+    networks:
+      - internal_net
+      - external_net
 
   # Deightz IDE, mounting this .env's PROJECT. The console opens it at
   # /deightz/.
@@ -159,8 +203,15 @@ services:
       internal_net:
       external_net: {}
 
-  # Gopher - test runner: a Streamlit dashboard to enumerate this cluster's
-  # containers, define HTTP/TCP checks against them, and run/track results.
+  # Gopher - test runner and doc generator, one Streamlit dashboard:
+  #   - Tests/Targets: HTTP/TCP checks against this cluster's containers,
+  #     probed over the networks gopher shares with them.
+  #   - Docs/Reports: API docs generated from this workspace's source with
+  #     each language's own doc tool (go doc, typedoc, pdoc), written to a
+  #     volume - never back into the repo - and reported on by LLM agents
+  #     that run in gopher-agents below, never in here.
+  # This container holds the Docker socket and the workspace source; the
+  # agents' container holds neither.
   gopher:
     image: dev:gopher
     profiles: [gopher]
@@ -169,63 +220,50 @@ services:
       context: ./dev/gopher
     env_file: ./.env
     environment:
+      - GOPHER_SOURCE_DIR=/home/${USER}/projects/${PROJECT}
       # dood's plain NATS client listener (dev/dood/server/nats.go),
       # reachable by its container name on internal_net.
       - GOPHER_NATS_URL=nats://dood:4222
-    volumes:
-      - gopher-data:/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      internal_net:
-      external_net: {}
-
-  # Carol - documentation generator: runs each language's own doc tool
-  # (go doc, typedoc, pdoc) against this workspace's source and writes the
-  # output to a volume, never back into the repo. Source is mounted
-  # read-only; only /data is writable.
-  carol:
-    image: dev:carol
-    profiles: [carol]
-    container_name: carol
-    build:
-      context: ./dev/carol
-    env_file: ./.env
-    environment:
-      - CAROL_SOURCE_DIR=/home/${USER}/projects/${PROJECT}
-      # dood's plain NATS client listener (dev/dood/server/nats.go),
-      # reachable by its container name on internal_net.
-      - CAROL_NATS_URL=nats://dood:4222
-      # Report runs go to carol-agents below; agents never run in here.
-      - CAROL_AGENTS_URL=http://carol-agents:8519
+      # Report runs go to gopher-agents below; agents never run in here.
+      - GOPHER_AGENTS_URL=http://gopher-agents:8519
     volumes:
       - /home/$USER/projects/$PROJECT:/home/$USER/projects/$PROJECT:ro
-      - carol-docs:/data
-      # Run history and report runs - kept off /data, which is served (and
-      # what's served, the report agents can read).
-      - carol-state:/state
-      # Carol's settings and prompt presets (dev/carol/server/settings.py),
+      # Generated docs - everything here is served, so the agents can read it.
+      - gopher-docs:/data
+      # Checks and their results, doc-run history and report runs - kept off
+      # /data. It's gopher's pre-merge data volume, so its checks carry over.
+      - gopher-data:/state
+      # One-time migration of carol's history and reports into /state (see
+      # dev/gopher/entrypoint.sh). Drop this, and carol-state below, once
+      # gopher has started with it.
+      - carol-state:/legacy/carol:ro
+      # Targets tab. :ro doesn't limit the Docker API - this is full control
+      # of the host's daemon, which is why only this container gets it.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Gopher's settings and prompt presets (dev/gopher/server/settings.py),
       # in the same host config dir dood mounts as /etc/d8z - but only this
       # one file, since the rest of it holds tokens and keys. Create it
       # first (even empty): a missing source becomes a root-owned directory.
-      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}/carol.yaml:/etc/d8z/carol.yaml
-    depends_on: [carol-agents]
+      - ${D8Z_CONFIG_DIR:-/home/$USER/.d8z}/gopher.yaml:/etc/d8z/gopher.yaml
+    depends_on: [gopher-agents]
     networks:
       internal_net:
       external_net: {}
 
-  # Carol's agent runner (dev/carol/server/agent_runner.py): the LLM CLIs
-  # behind carol's Reports tab run here, not in carol, so they can't stray
+  # Gopher's agent runner (dev/gopher/server/agent_runner.py): the LLM CLIs
+  # behind gopher's Reports tab run here, not in gopher, so they can't stray
   # outside the generated docs. They read the docs only as plain text from
-  # carol's doc server (http://carol:8503/.../docs/...?format=text), so this
-  # mounts nothing at all - no docs, no workspace source, no carol state -
-  # and gets the LLM keys alone, not the whole .env. Each CLI's own limits
-  # (curl to the doc server, nothing else) are in dev/carol/agent-config/.
-  carol-agents:
-    image: dev:carol
-    profiles: [carol]
-    container_name: carol-agents
+  # gopher's doc server (http://gopher:8502/.../docs/...?format=text), so this
+  # mounts nothing at all - no docs, no workspace source, no gopher state, no
+  # Docker socket - and gets the LLM keys alone, not the whole .env. Each
+  # CLI's own limits (curl to the doc server, nothing else) are in
+  # dev/gopher/agent-config/.
+  gopher-agents:
+    image: dev:gopher
+    profiles: [gopher]
+    container_name: gopher-agents
     build:
-      context: ./dev/carol
+      context: ./dev/gopher
     working_dir: /app
     entrypoint: ["python3", "-m", "server.agent_runner"]
     environment:
@@ -276,8 +314,8 @@ networks:
 volumes:
   og-ollama-data:
   gopher-data:
-  carol-docs:
-  carol-state:
+  gopher-docs:
+  carol-state:   # migration only - see gopher's volumes
   dind-sock:
   dind-data:
   d8z-nats:

@@ -6,8 +6,11 @@ import react from "@vitejs/plugin-react";
 //
 // `npm run dev` proxies the API and sub-apps to a running gateway:
 //   GW_TARGET=http://user:pass@localhost:8080 npm run dev
+// /auth (console-next) only exists once GW_TARGET points at a running
+// console-next instance instead of gw-server directly - point it at
+// console-next's own port (e.g. 8787) when developing against that stack.
 const target = process.env.GW_TARGET || "http://localhost:8080";
-const proxied = ["/api", "/deightz", "/og", "/dozzle", "/gw"];
+const proxied = ["/api", "/auth", "/deightz", "/og", "/dozzle", "/gw"];
 
 export default defineConfig({
   base: "./",

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+src/types.gen.ts
+*.db

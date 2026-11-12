@@ -22,13 +22,20 @@ import type {
   WorkspaceStatus,
 } from "./types";
 
+/** ApiError carries the HTTP status alongside the message, so callers like Auth.tsx can tell "no such route" (404 - this gateway has no console-next in front) apart from "route exists, request rejected" (401/etc). */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { cache: "no-store", ...opts });
   const type = res.headers.get("content-type") || "";
   const body: unknown = type.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) {
     const message = body && typeof body === "object" && "error" in body ? String(body.error) : undefined;
-    throw new Error(message || `${res.status} ${res.statusText}`);
+    throw new ApiError(message || `${res.status} ${res.statusText}`, res.status);
   }
   return body as T;
 }
@@ -38,6 +45,23 @@ function send<T>(method: string, path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  /**
+   * Signs in, establishing the session cookie console-next's other routes
+   * require.
+   * @route POST /auth/login
+   */
+  login: (username: string, password: string): Promise<{ username: string; isAdmin: boolean }> =>
+    send("POST", "auth/login", { username, password }),
+  /**
+   * Ends the current session.
+   * @route POST /auth/logout
+   */
+  logout: (): Promise<void> => request("auth/logout", { method: "POST" }),
+  /**
+   * Who the current session belongs to; rejects if there isn't one.
+   * @route GET /auth/me
+   */
+  me: (): Promise<{ username: string; isAdmin: boolean }> => request("auth/me"),
   /** This gateway's own identity and live status. */
   self: (): Promise<Self> => request("api/self"),
   /** Every ad hoc child gateway spawned under this one. */
