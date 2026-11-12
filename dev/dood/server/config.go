@@ -81,7 +81,7 @@ func loadConfig() Config {
 		NatsLeafPass:    os.Getenv("GW_NATS_LEAF_PASSWORD"),
 		NatsClientPort:  getenvInt("GW_NATS_CLIENT_PORT", 4222),
 	}
-	for _, s := range strings.Split(getenv("GW_SERVICES", "deightz,og,gopher,carol,dozzle"), ",") {
+	for _, s := range strings.Split(getenv("GW_SERVICES", "deightz,og,gopher,dozzle"), ",") {
 		if s = strings.TrimSpace(s); s != "" {
 			c.Services = append(c.Services, s)
 		}
@@ -104,8 +104,7 @@ type Profile struct {
 var profiles = []Profile{
 	{Name: "deightz", Label: "Deightz IDE", UI: true},
 	{Name: "og", Label: "Ollama gateway", UI: true},
-	{Name: "gopher", Label: "Gopher test runner", UI: true},
-	{Name: "carol", Label: "Carol doc generator", UI: true},
+	{Name: "gopher", Label: "Gopher tests & docs", UI: true},
 	{Name: "dozzle", Label: "Dozzle logs", UI: true},
 }
 

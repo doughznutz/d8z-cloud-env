@@ -51,7 +51,7 @@ func gwSubject(id, suffix string) string {
 // startNatsHub brings up the embedded server, its JetStream store, an
 // in-process client (see NatsHub.nc below), and a plain client listener on
 // NatsClientPort - unauthenticated, like the rest of internal_net, so an
-// ordinary NATS client in another dev container (gopher's or carol's chat
+// ordinary NATS client in another dev container (gopher's chat
 // tab, say)
 // can connect directly instead of going through this gateway's HTTP API.
 func startNatsHub(cfg Config) (*NatsHub, error) {

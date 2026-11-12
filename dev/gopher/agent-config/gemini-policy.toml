@@ -1,0 +1,37 @@
+# Gemini CLI policy for gopher's report runs: the generated docs, read only
+# as plain text from gopher's doc server with curl - nothing else. Installed
+# in gemini's system (admin-tier) policy directory, /etc/gemini-cli/policies/,
+# which user/workspace settings can't override (see dev/gopher/Dockerfile).
+
+# The one thing allowed: curl against gopher's doc server, and nothing after
+# the URL. Gemini matches commandRegex against the call's JSON arguments as
+# "command":"<regex> - so the closing " here means the command must end right
+# after the URL (no ; && | or anything else appended). (Not commandPrefix:
+# gemini only matches a prefix at a word boundary, so a prefix ending inside
+# the URL never matches at all.) Gemini also checks each part of a compound
+# command on its own, so `curl ... ; cat x` still has its `cat` denied.
+[[rule]]
+toolName = "run_shell_command"
+commandRegex = "curl -s '?http://gopher:8502/[A-Za-z0-9._~/?=#%:+-]*'?\""
+decision = "allow"
+priority = 950
+
+# Everything else: any other command, and every file/web/memory tool - the
+# docs are only reachable through the doc server.
+[[rule]]
+toolName = [
+  "run_shell_command",
+  "read_file",
+  "read_many_files",
+  "list_directory",
+  "glob",
+  "grep_search",
+  "write_file",
+  "replace",
+  "web_fetch",
+  "google_web_search",
+  "save_memory",
+]
+decision = "deny"
+priority = 900
+denyMessage = "Gopher's report runs may only read the docs with: curl -s '<doc server url>'"

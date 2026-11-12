@@ -772,7 +772,7 @@ func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]s
 	fmt.Fprintf(&b, "  dood:\n    environment:\n")
 	// Every sidebar-capable service, not just the ones started with it: the
 	// console lists only those actually in its bundle, so one started later
-	// on demand (og, gopher, carol) shows up too.
+	// on demand (og, gopher) shows up too.
 	isolated, dozzle, svcs := "false", "", uiServices(allProfileNames())
 	if inDind {
 		isolated = "true"
@@ -820,7 +820,6 @@ func (m *Manager) renderOverride(req SpawnRequest, profs []string, labels [][2]s
 	fmt.Fprintf(&b, "  dozzle:\n    environment:\n      DOZZLE_BASE: %s\n", yq(prefix+"/dozzle"))
 	fmt.Fprintf(&b, "  og:\n    environment:\n      OG_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/og", "/")))
 	fmt.Fprintf(&b, "  gopher:\n    environment:\n      GOPHER_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/gopher", "/")))
-	fmt.Fprintf(&b, "  carol:\n    environment:\n      CAROL_BASE_PATH: %s\n", yq(strings.TrimPrefix(prefix+"/carol", "/")))
 	if ws != nil {
 		// Its Deightz edits the same workspace.
 		b.WriteString("  deightz:\n    environment:\n      GITHUB_TOKEN: \"\"\n    volumes: !override\n      - /var/run/docker.sock:/var/run/docker.sock\n")

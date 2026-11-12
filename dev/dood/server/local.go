@@ -12,7 +12,7 @@ import (
 
 // LocalService is one of the root project's own long-running non-gateway
 // services: Deightz (profile workspace) and the optional tools started on
-// demand from the Control tab (og, gopher, carol, dozzle), each in its own
+// demand from the Control tab (og, gopher, dozzle), each in its own
 // profile. The deploy tooling isn't here - it's one-shot jobs (the jobs
 // package).
 // Unlike a gateway, these live in our own compose project (selfProject) and
@@ -28,8 +28,7 @@ type LocalService struct {
 var localServices = []LocalService{
 	{Name: "deightz", Label: "Deightz IDE", Profile: "workspace", BundleProfile: "deightz"},
 	{Name: "og", Label: "Ollama gateway", Profile: "og", BundleProfile: "og"},
-	{Name: "gopher", Label: "Gopher test runner", Profile: "gopher", BundleProfile: "gopher"},
-	{Name: "carol", Label: "Carol doc generator", Profile: "carol", BundleProfile: "carol"},
+	{Name: "gopher", Label: "Gopher tests & docs", Profile: "gopher", BundleProfile: "gopher"},
 	{Name: "dozzle", Label: "Dozzle logs", Profile: "dozzle", BundleProfile: "dozzle"},
 }
 
@@ -137,8 +136,6 @@ func localBasePath(name, prefix string) (envVar, value string, ok bool) {
 		return "OG_BASE_PATH", strings.TrimPrefix(prefix+"/og", "/"), true
 	case "gopher":
 		return "GOPHER_BASE_PATH", strings.TrimPrefix(prefix+"/gopher", "/"), true
-	case "carol":
-		return "CAROL_BASE_PATH", strings.TrimPrefix(prefix+"/carol", "/"), true
 	default:
 		return "", "", false
 	}

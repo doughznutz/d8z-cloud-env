@@ -26,8 +26,7 @@ import type { Gateway, Job, JobRun, Request, Route, Self, ServiceStatus, Workspa
 const SERVICES: Record<string, { ico: string; name: string; desc: string; compose: string }> = {
   deightz: { ico: "⌨", name: "Deightz", desc: "Code-server IDE", compose: "deightz" },
   og: { ico: "✱", name: "OG", desc: "Ollama gateway", compose: "og" },
-  gopher: { ico: "✓", name: "Gopher", desc: "Cluster test runner", compose: "gopher" },
-  carol: { ico: "✎", name: "Carol", desc: "Doc generator", compose: "carol" },
+  gopher: { ico: "✓", name: "Gopher", desc: "Tests & docs", compose: "gopher" },
   dozzle: { ico: "≡", name: "Dozzle", desc: "Container logs", compose: "dozzle" },
 };
 
@@ -147,7 +146,7 @@ export default function App() {
         .filter((s) => SERVICES[s])
         // Only services this bundle actually has: the root profile starts
         // with just dood; deightz comes with the workspace profile (or a
-        // workspace gateway), og/gopher/carol/dozzle on demand from the Control tab.
+        // workspace gateway), og/gopher/dozzle on demand from the Control tab.
         .filter(
           (s) =>
             (s === "dozzle" && self?.dozzlePath) ||

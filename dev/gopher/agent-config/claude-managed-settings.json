@@ -1,0 +1,23 @@
+{
+  "allowManagedPermissionRulesOnly": true,
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "allow": [
+      "Bash(curl -s 'http://gopher:8502/:*)",
+      "Bash(curl -s \"http://gopher:8502/:*)",
+      "Bash(curl -s http://gopher:8502/:*)"
+    ],
+    "deny": [
+      "Read",
+      "Glob",
+      "Grep",
+      "LS",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}
